@@ -1,0 +1,33 @@
+# ── ESP-IDF build output ──
+build/
+
+# ── ESP-IDF generated / managed ──
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# ── Directories excluded per project policy ──
+archive/
+docs/
+pc_demo/
+debug/
+vendor/
+
+# ── Server runtime directories ──
+server/archive/
+server/debug/
+server/docs/
+server/downloads/
+
+# ── Python artifacts ──
+__pycache__/
+*.py[cod]
+
+# ── IDE / tooling ──
+.claude/
+.vscode/
+
+# ── OS junk ──
+Thumbs.db
+.DS_Store
