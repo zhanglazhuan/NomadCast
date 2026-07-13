@@ -1,0 +1,4 @@
+[codespell]
+skip = _build,*.drawio,*.svg,*.pdf,*.js,*.py,*.html
+ignore-words-list = EMAC,OEN,emac,AFE
+write-changes = true

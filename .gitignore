@@ -12,7 +12,6 @@ archive/
 docs/
 pc_demo/
 debug/
-vendor/
 
 # ── Server runtime directories ──
 server/archive/
