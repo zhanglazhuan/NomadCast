@@ -23,7 +23,6 @@
 #include "app_manager.h"
 
 extern PodcastApp g_podcast_app;
-extern const lv_image_dsc_t ic_search;
 extern const lv_image_dsc_t ic_forward_media;
 
 /* 加载超时 (ms), 方便后续修改 */
@@ -31,13 +30,12 @@ extern const lv_image_dsc_t ic_forward_media;
 /* Loading 动画刷新间隔 (ms) */
 #define LOADING_ANIM_INTERVAL_MS 400
 
-static const char* CATEGORY_NAMES[CHANNEL_CATEGORY_COUNT] = {
-    "时事", "科技", "人文", "生活", "教育", "其他",
-};
+#define CAT_ALL  (-1)   /* dropdown index for "全部" */
 
 typedef struct {
-    lv_obj_t* tabview;
-    lv_obj_t* tab_pages[CHANNEL_CATEGORY_COUNT];
+    lv_obj_t* dropdown;
+    lv_obj_t* content;    /* single scrollable content area */
+    int       active_cat;   /* CAT_ALL or 0..CHANNEL_CATEGORY_COUNT-1 */
 } NetworkPageCtx;
 
 /* ── 页面状态 ─────────────────────────────────────────────────────────── */
@@ -97,7 +95,8 @@ static void build_wifi_offline(lv_obj_t* parent, NetworkPage* np) {
     lv_label_set_text(label, "No network.\nPlease connect WiFi in Settings.");
     lv_obj_set_style_text_color(label, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
-    lv_obj_set_size(label, 200, 48);
+    lv_obj_set_size(label, 200, LV_SIZE_CONTENT);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, -30);
 
@@ -236,7 +235,7 @@ static lv_obj_t* build_loading(lv_obj_t* parent) {
 
 /* ── Chunked card creation to avoid watchdog ──────────────────────────────── */
 
-#define CARDS_PER_TICK 2  /* create this many cards per LVGL tick */
+#define CARDS_PER_TICK 6  /* create this many cards per LVGL tick */
 
 typedef struct {
     lv_obj_t      *row;
@@ -271,100 +270,121 @@ static void build_card_chunk_cb(lv_timer_t *timer) {
     }
 }
 
-static void refresh_list(NetworkPageCtx* ctx, channel_category_t cat) {
-    lv_obj_t* page = ctx->tab_pages[cat];
-    if (!page) { printf("[refresh] no page for cat=%d\n", cat); fflush(stdout); return; }
-
-    /* Clear, add scroll container */
+static void refresh_list(NetworkPageCtx* ctx, int cat) {
+    lv_obj_t* page = ctx->content;
+    if (!page) return;
     lv_obj_clean(page);
-    lv_obj_set_style_pad_all(page, 0, 0);
-    lv_obj_set_style_bg_color(page, lv_color_hex(0xF5F5F5), 0);
 
-    int offset = podcast_model_get_network_shown(&g_podcast_app, cat);
-    int count = 0;
-    const Channel** albums = podcast_model_get_network_page(&g_podcast_app, cat, offset, NETWORK_PAGE_SIZE, &count);
+    int total = 0;
+    const Channel **albums = NULL;
 
-    /* Clear, rebuild as vertical scrolling list */
-    lv_obj_clean(page);
+    if (cat == CAT_ALL) {
+        /* Collect all channels across categories */
+        for (int c = 0; c < CHANNEL_CATEGORY_COUNT; c++) {
+            int n = 0;
+            const Channel **a = podcast_model_get_network_page(&g_podcast_app,
+                (channel_category_t)c, 0, NETWORK_PAGE_SIZE, &n);
+            if (n > 0) {
+                albums = (const Channel **)realloc(albums,
+                            (total + n) * sizeof(Channel *));
+                memcpy(albums + total, a, n * sizeof(Channel *));
+                total += n;
+            }
+        }
+    } else {
+        albums = podcast_model_get_network_page(&g_podcast_app,
+            (channel_category_t)cat, 0, NETWORK_PAGE_SIZE, &total);
+    }
+
+    printf("[refresh] cat=%d count=%d\n", cat, total); fflush(stdout);
+
     lv_obj_set_style_pad_top(page, CARD_PAD, 0);
     lv_obj_set_style_pad_left(page, 8, 0);
     lv_obj_set_style_pad_row(page, CARD_PAD, 0);
     lv_obj_set_style_bg_color(page, lv_color_hex(0xF5F5F5), 0);
     lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_scroll_dir(page, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_flag(page, LV_OBJ_FLAG_SCROLL_MOMENTUM);
 
-    printf("[refresh] cat=%d count=%d offset=%d\n", cat, count, offset); fflush(stdout);
+    if (total == 0) { free(albums); return; }
 
-    if (count == 0) return;
-
-    /* Chunked card creation */
     card_build_ctx_t *bc = (card_build_ctx_t *)calloc(1, sizeof(card_build_ctx_t));
     bc->row    = page;
     bc->albums = albums;
-    bc->count  = count;
-    bc->card_h = 0; /* unused now */
+    bc->count  = total;
     lv_timer_create(build_card_chunk_cb, 1, bc);
 }
 
-/* 滚动到末尾时触发加载更多 */
-static void on_tab_changed(lv_event_t* e) {
+static void on_dropdown_changed(lv_event_t* e) {
     NetworkPageCtx* ctx = lv_event_get_user_data(e);
-    int active = lv_tabview_get_tab_active(lv_event_get_current_target_obj(e));
-    if (active >= 0 && active < CHANNEL_CATEGORY_COUNT) {
-        podcast_model_set_network_active_category(&g_podcast_app, active);
-        refresh_list(ctx, (channel_category_t)active);
-    }
+    uint32_t sel = lv_dropdown_get_selected(lv_event_get_current_target_obj(e));
+    /* Dropdown: 0="全部", 1..N=category */
+    ctx->active_cat = (sel == 0) ? CAT_ALL : (int)(sel - 1);
+    refresh_list(ctx, ctx->active_cat);
+}
+
+static void on_search_bar_clicked(lv_event_t* e) {
+    (void)e;
+    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_NETWORK, PAGE_SEARCH, NULL);
 }
 
 static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
-    lv_obj_t* tv = lv_tabview_create(parent);
-    lv_obj_set_size(tv, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_grow(tv, 1);
-    for (int i = 0; i < CHANNEL_CATEGORY_COUNT; i++) {
-        ctx->tab_pages[i] = lv_tabview_add_tab(tv, CATEGORY_NAMES[i]);
-        lv_obj_set_user_data(ctx->tab_pages[i], (void*)(uintptr_t)i);
-    }
-    ctx->tabview = tv;
-    lv_obj_add_event_cb(tv, on_tab_changed, LV_EVENT_VALUE_CHANGED, ctx);
+    /* Top bar: [search flex] --gap-- [dropdown 35%] = 95% wide */
+    lv_obj_t *top_bar = lv_obj_create(parent);
+    lv_obj_set_size(top_bar, LV_PCT(95), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(top_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(top_bar, 0, 0);
+    lv_obj_set_style_pad_left(top_bar, 8, 0);
+    lv_obj_set_style_pad_column(top_bar, 6, 0);
+    lv_obj_set_style_border_width(top_bar, 0, 0);
+    lv_obj_set_style_bg_opa(top_bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_scrollbar_mode(top_bar, LV_SCROLLBAR_MODE_OFF);
 
-    lv_obj_t* tab_bar = lv_tabview_get_tab_bar(tv);
-    lv_obj_set_style_pad_all(tab_bar, 0, 0);
-    lv_obj_set_style_border_width(tab_bar, 0, 0);
-    lv_obj_set_style_bg_color(tab_bar, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_height(tab_bar, 32);
-    lv_obj_set_scroll_dir(tab_bar, LV_DIR_HOR);
-    lv_obj_set_scrollbar_mode(tab_bar, LV_SCROLLBAR_MODE_ON);
-    uint32_t n = lv_obj_get_child_count(tab_bar);
-    for (uint32_t i = 0; i < n; i++) {
-        lv_obj_t* tb = lv_obj_get_child(tab_bar, i);
-        lv_obj_set_width(tb, 96);
-        lv_obj_set_style_pad_hor(tb, 2, 0);
-        lv_obj_set_style_flex_grow(tb, 0, 0);
-        lv_obj_t* lbl = lv_obj_get_child(tb, 0);
-        if (lbl) {
-            lv_obj_set_style_text_font(lbl, g_cjk_font, 0);
-        }
-    }
+    /* Search bar — matches dropdown */
+    lv_obj_t *search_btn = lv_button_create(top_bar);
+    lv_obj_set_flex_grow(search_btn, 1);
+    lv_obj_set_height(search_btn, 32);
+    lv_obj_set_style_bg_color(search_btn, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_width(search_btn, 2, 0);
+    lv_obj_set_style_border_color(search_btn, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_border_opa(search_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(search_btn, 6, 0);
+    lv_obj_set_style_shadow_width(search_btn, 0, 0);
+    lv_obj_add_event_cb(search_btn, on_search_bar_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *search_lbl = lv_label_create(search_btn);
+    lv_label_set_text(search_lbl, "Search...");
+    lv_obj_set_style_text_color(search_lbl, lv_color_hex(0x999999), 0);
+    lv_obj_align(search_lbl, LV_ALIGN_LEFT_MID, 8, 0);
 
-    int cat = podcast_model_get_network_active_category(&g_podcast_app);
-    lv_tabview_set_active(ctx->tabview, cat, LV_ANIM_OFF);
+    /* Category dropdown */
+    ctx->dropdown = lv_dropdown_create(top_bar);
+    lv_dropdown_set_options(ctx->dropdown,
+        "全部\n时事\n科技\n人文\n生活\n教育\n其他");
+    lv_obj_set_width(ctx->dropdown, LV_PCT(35));
+    lv_obj_set_height(ctx->dropdown, 32);
+    lv_obj_set_style_border_width(ctx->dropdown, 2, 0);
+    lv_obj_set_style_border_color(ctx->dropdown, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_border_opa(ctx->dropdown, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(ctx->dropdown, 6, 0);
+    lv_obj_set_style_pad_hor(ctx->dropdown, 8, 0);
+    lv_obj_add_event_cb(ctx->dropdown, on_dropdown_changed,
+                        LV_EVENT_VALUE_CHANGED, ctx);
 
-    /* Ensure content is loaded — set_active only fires VALUE_CHANGED if
-     * the tab actually changed.  If the stored category is the default (0),
-     * the event won't fire; call refresh_list explicitly. */
-    if (ctx->tab_pages[cat] && lv_obj_get_child_count(ctx->tab_pages[cat]) == 0) {
-        refresh_list(ctx, (channel_category_t)cat);
-    }
+    /* Prevent dropdown list from extending past the right edge */
+    lv_obj_t *dd_list = lv_dropdown_get_list(ctx->dropdown);
+    lv_obj_set_width(dd_list, lv_pct(55));
+    lv_obj_set_style_pad_hor(dd_list, 6, 0);
 
-    /* Scroll tab bar so the active tab is visible */
-    tab_bar = lv_tabview_get_tab_bar(ctx->tabview);
-    uint32_t active_idx = (uint32_t)cat;
-    if (active_idx < lv_obj_get_child_count(tab_bar)) {
-        lv_obj_scroll_to_view(lv_obj_get_child(tab_bar, active_idx), LV_ANIM_OFF);
-    }
+    /* Content area — scrollable card list */
+    ctx->content = lv_obj_create(parent);
+    lv_obj_set_size(ctx->content, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_flex_grow(ctx->content, 1);
+
+    /* Default: "全部" */
+    ctx->active_cat = CAT_ALL;
+    lv_dropdown_set_selected(ctx->dropdown, 0);
+    refresh_list(ctx, CAT_ALL);
 }
 
 /* ── 搜索 / 本地链接 ───────────────────────────────────────────────────── */
@@ -372,26 +392,18 @@ static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
 static void on_forward_clicked(lv_event_t* e) {
     (void)e;
     NetworkPageCtx* ctx = g_podcast_app.view->page_nav.nav_ctx;
-    if (!ctx || !ctx->tabview) return;
-    int active = lv_tabview_get_tab_active(ctx->tabview);
-    if (active < 0 || active >= CHANNEL_CATEGORY_COUNT) return;
+    if (!ctx || ctx->active_cat == CAT_ALL) return;
 
-    channel_category_t cat = (channel_category_t)active;
+    channel_category_t cat = (channel_category_t)ctx->active_cat;
     int total = podcast_model_get_network_total(&g_podcast_app, cat);
     int shown = podcast_model_get_network_shown(&g_podcast_app, cat);
 
-    /* Advance offset by NETWORK_PAGE_SIZE, wrap to 0 when at end */
     int offset = shown + NETWORK_PAGE_SIZE;
     if (offset >= total) offset = 0;
     g_podcast_app.model->network_channels_shown[cat] = offset;
 
     fprintf(stderr, "[FWD] cat=%d total=%d offset=%d\n", cat, total, offset);
     refresh_list(ctx, cat);
-}
-
-static void on_search_clicked(lv_event_t* e) {
-    (void)e;
-    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_NETWORK, PAGE_SEARCH, NULL);
 }
 
 /* ── 点击处理 ────────────────────────────────────────────────────────── */
@@ -407,26 +419,6 @@ static void on_card_clicked(lv_event_t* e) {
 
 #define FAB_SIZE  40
 #define FAB_MARGIN_RIGHT 12
-
-static void create_search_fab(lv_obj_t* screen) {
-    lv_obj_t* fab = lv_button_create(screen);
-    lv_obj_set_size(fab, FAB_SIZE, FAB_SIZE);
-    lv_obj_set_style_radius(fab, FAB_SIZE / 2, 0);
-    lv_obj_set_style_bg_color(fab, lv_color_hex(0x1976D2), 0);
-    lv_obj_set_style_border_width(fab, 0, 0);
-    lv_obj_set_style_shadow_width(fab, 20, 0);
-    lv_obj_set_style_shadow_color(fab, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_shadow_opa(fab, LV_OPA_30, 0);
-    lv_obj_add_flag(fab, LV_OBJ_FLAG_FLOATING);
-    lv_obj_add_event_cb(fab, on_search_clicked, LV_EVENT_CLICKED, NULL);
-    lv_obj_align(fab, LV_ALIGN_BOTTOM_RIGHT, -FAB_MARGIN_RIGHT, -48);
-
-    lv_obj_t* img = lv_image_create(fab);
-    lv_image_set_src(img, &ic_search);
-    lv_obj_center(img);
-    lv_obj_set_style_img_recolor(img, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
-}
 
 static void create_forward_fab(lv_obj_t* screen) {
     lv_obj_t* fab = lv_button_create(screen);
@@ -565,8 +557,7 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
         }
     }
 
-    /* 悬浮搜索 + 底栏 (所有状态均显示) */
-    create_search_fab(page.screen);
+    /* 前进按钮 + 底栏 (所有状态均显示) */
     create_forward_fab(page.screen);
     podcast_view_create_bottom_tab_bar(page.screen, TAB_NETWORK);
 

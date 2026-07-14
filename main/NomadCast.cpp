@@ -323,29 +323,10 @@ extern "C" void app_main(void)
     /* [6] Key input */
     input_init(on_key_event, NULL);
 
-    /* [6.5] Sleep monitor — after input is ready, before apps start */
+    /* [6.5] Sleep monitor — after input is ready, before apps start.
+     * Power is never cut during screen-off (SD downloads must survive),
+     * so no wake callback is needed — just display+blank + touch disable. */
     sleep_monitor_init(s_panel, s_touch_indev, 0); /* 0 = never sleep (debug) */
-    sleep_monitor_set_power_pin(PIN_EN_POWER);
-    sleep_monitor_set_wake_callback([]() {
-        /* Re-init LCD after power restore */
-        esp_lcd_panel_init(s_panel);
-        esp_lcd_panel_invert_color(s_panel, true);
-        esp_lcd_panel_disp_on_off(s_panel, true);
-
-        /* Re-init GT911 touch — peripheral power was cut, registers lost */
-        if (s_gt911_dev) {
-            gt911_deinit(s_gt911_dev);
-            s_gt911_dev = NULL;
-        }
-        if (gt911_init(&s_gt911_cfg, &s_gt911_dev) == ESP_OK) {
-            if (s_gt911_cfg.use_interrupt) {
-                gt911_register_isr(s_gt911_dev, on_gt911_touch, NULL);
-            }
-            ESP_LOGI(TAG, "Touch re-initialized after wake");
-        } else {
-            ESP_LOGW(TAG, "Touch re-init failed after wake");
-        }
-    });
 
     /* [6.6] Flash store — must be before any app reads settings */
     flash_store_init();

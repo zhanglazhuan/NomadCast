@@ -72,11 +72,10 @@ static void enter_sleep(void)
         lv_indev_enable(s_touch_indev, false);
     }
 
-    /* 3. Cut peripheral power */
-    if (s_power_pin != GPIO_NUM_NC) {
-        gpio_set_level(s_power_pin, 0);
-        ESP_LOGI(TAG, "EN_POWER LOW — peripherals off");
-    }
+    /* 3. Keep peripheral power ON — SD card downloads must survive screen-off.
+     *    Only blank display + disable touch.  The LCD backlight is the dominant
+     *    power consumer; GPIO 46's savings are negligible. */
+    (void)s_power_pin;
 
     s_is_sleeping = true;
 }
@@ -105,25 +104,13 @@ static void wake_from_sleep(void)
     s_is_sleeping = false;
     ESP_LOGI(TAG, "Waking from sleep");
 
-    /* 1. Restore peripheral power */
-    if (s_power_pin != GPIO_NUM_NC) {
-        gpio_set_level(s_power_pin, 1);
-        ESP_LOGI(TAG, "EN_POWER HIGH — peripherals on");
-        /* Wait for power stabilization + hardware reset */
-        vTaskDelay(pdMS_TO_TICKS(300));
-    }
+    /* Power was never cut — just turn display and touch back on */
+    esp_lcd_panel_disp_on_off(s_panel, true);
 
-    /* 2. Re-init hardware via wake callback (display + touch) */
-    if (s_wake_cb) {
-        s_wake_cb();
-    }
-
-    /* 3. Re-enable touch */
     if (s_touch_indev) {
         lv_indev_enable(s_touch_indev, true);
     }
 
-    /* 4. Reset activity timer */
     s_last_activity_ms = esp_timer_get_time() / 1000;
 }
 
