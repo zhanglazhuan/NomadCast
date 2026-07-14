@@ -18,6 +18,7 @@ typedef struct {
     bool    secured;
     uint8_t bssid[6];         // BSSID from scan — for direct/BSSID connect
     uint8_t channel;          // primary channel
+    int8_t  rssi;             // raw RSSI in dBm (e.g. -45)
 } WifiNetwork;
 
 /* ── 设置数据 ──────────────────────────────────────────────────────────────── */

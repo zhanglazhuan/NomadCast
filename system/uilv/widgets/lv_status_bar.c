@@ -236,11 +236,12 @@ void lv_status_bar_set_download_speed(lv_status_bar_t *sb, int speed_bps)
         lv_obj_add_flag(sb->speed_label, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    int kbps = speed_bps * 8 / 1000;   /* bytes/s → kilobits/s */
     char buf[16];
-    if (speed_bps < 1024 * 1024)
-        snprintf(buf, sizeof(buf), "%d KB/s", speed_bps / 1024);
+    if (kbps < 1000)
+        snprintf(buf, sizeof(buf), "%d kb/s", kbps);
     else
-        snprintf(buf, sizeof(buf), "%.1f MB/s", speed_bps / (1024.0 * 1024.0));
+        snprintf(buf, sizeof(buf), "%.1f Mb/s", kbps / 1000.0);
     /* Only touch LVGL when the text actually changes — avoids redundant invalidation */
     if (strcmp(lv_label_get_text(sb->speed_label), buf) != 0)
         lv_label_set_text(sb->speed_label, buf);

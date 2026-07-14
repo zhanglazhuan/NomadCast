@@ -275,6 +275,10 @@ void settings_model_start_wifi_scan(struct SettingsApp* app) {
     app->model->scanned_count    = count;
     app->model->wifi_scanning    = false;
     ESP_LOGI(TAG, "wifi scan complete, %d networks found", count);
+    for (int i = 0; i < count; i++) {
+        ESP_LOGI(TAG, "  [%d] \"%s\"  RSSI=%d dBm",
+                 i + 1, nets[i].ssid, nets[i].rssi);
+    }
 }
 
 void settings_model_set_pending_connect(struct SettingsApp* app, const char* ssid) {

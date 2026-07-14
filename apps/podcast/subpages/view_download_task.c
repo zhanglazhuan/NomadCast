@@ -29,6 +29,8 @@ typedef struct DownloadTaskPageCtx_s {
     int       task_count;
     lv_obj_t* sel_label;
     lv_obj_t* action_bar;
+    lv_obj_t* pause_btn;
+    lv_obj_t* pause_label;
     lv_obj_t* delete_btn;
     lv_bottom_sheet_t* confirm_sheet;
     lv_obj_t* list_container;
@@ -222,6 +224,23 @@ static void on_delete_confirm(lv_event_t* e) {
         page_navigator_navigate_to(&ctx->app->view->page_nav, ctx->app, PAGE_DOWNLOAD_TASK, NULL);
     free(keep_file_ids);
     free(purge_ids);
+}
+
+/* ---- Pause / Resume 按钮 ---- */
+static void on_pause_resume_clicked(lv_event_t* e) {
+    DownloadTaskPageCtx* ctx = lv_event_get_user_data(e);
+    struct PodcastApp *app = ctx ? ctx->app : NULL;
+    if (!app) return;
+    if (podcast_controller_is_download_paused(app)) {
+        podcast_controller_resume_all_downloads(app);
+    } else {
+        podcast_controller_pause_all_downloads(app);
+    }
+    /* Refresh the page to update button text */
+    if (ctx && ctx->app) {
+        page_navigator_navigate_to(&ctx->app->view->page_nav, ctx->app,
+                                   PAGE_DOWNLOAD_TASK, NULL);
+    }
 }
 
 /* ---- 删除按钮: 弹出二次确认 ---- */
@@ -542,11 +561,26 @@ static lv_obj_t* build_action_bar(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     ctx->delete_btn = lv_button_create(bar);
     lv_obj_set_size(ctx->delete_btn, 80, 28);
     lv_obj_set_style_bg_color(ctx->delete_btn, lv_color_hex(0xE53935), 0);
+    lv_obj_set_style_radius(ctx->delete_btn, 6, 0);
     lv_obj_add_event_cb(ctx->delete_btn, on_delete_clicked, LV_EVENT_CLICKED, ctx);
     lv_obj_t* dl = lv_label_create(ctx->delete_btn);
     lv_label_set_text(dl, "Delete");
     lv_obj_center(dl);
     lv_obj_set_style_text_color(dl, lv_color_hex(0xFFFFFF), 0);
+
+    /* Pause / Resume 按钮 — 在 Delete 右侧 */
+    ctx->pause_btn = lv_button_create(bar);
+    lv_obj_set_size(ctx->pause_btn, 80, 28);
+    lv_obj_set_style_bg_color(ctx->pause_btn,
+        podcast_controller_is_download_paused(ctx->app)
+            ? lv_color_hex(0x4CAF50) : lv_color_hex(0xFF9800), 0);
+    lv_obj_set_style_radius(ctx->pause_btn, 6, 0);
+    lv_obj_add_event_cb(ctx->pause_btn, on_pause_resume_clicked, LV_EVENT_CLICKED, ctx);
+    ctx->pause_label = lv_label_create(ctx->pause_btn);
+    lv_label_set_text(ctx->pause_label,
+        podcast_controller_is_download_paused(ctx->app) ? "Resume" : "Pause");
+    lv_obj_center(ctx->pause_label);
+    lv_obj_set_style_text_color(ctx->pause_label, lv_color_hex(0xFFFFFF), 0);
 
     ctx->action_bar = bar;
     return bar;

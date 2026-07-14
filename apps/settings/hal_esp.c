@@ -222,6 +222,7 @@ int hal_wifi_scan(hal_wifi_ap_t **out)
             snprintf(nets[i].ssid, sizeof(nets[i].ssid), "<Hidden %d>", i);
         }
         nets[i].signal_strength = rssi_to_pct(aps[i].rssi);
+        nets[i].rssi            = aps[i].rssi;
         nets[i].secured = (aps[i].authmode != WIFI_AUTH_OPEN);
         memcpy(nets[i].bssid, aps[i].bssid, 6);
         nets[i].channel = aps[i].primary;

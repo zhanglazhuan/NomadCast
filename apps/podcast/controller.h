@@ -40,10 +40,13 @@ typedef struct {
 
 /* ── Controller ────────────────────────────────────────────────────────────── */
 
+typedef struct PodcastCtrlCtx PodcastCtrlCtx;  /* private, defined in controller.c */
+
 typedef struct PodcastController {
     struct PodcastModel *model;
     struct PodcastView  *view;
-    bool     loading_in_progress;   /* true when an async operation is in flight */
+    PodcastCtrlCtx      *ctx;        /* all mutable state — freed on deinit */
+    bool                 loading_in_progress;
 } PodcastController;
 
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */
@@ -129,6 +132,15 @@ void podcast_download_url(char *out, int out_sz, const char *url);
 
 /** Re-enqueue PENDING tasks after boot / WiFi reconnect */
 void podcast_controller_resume_downloads(struct PodcastApp *app);
+
+/** Pause all download activity (worker stays alive, waits for resume). */
+void podcast_controller_pause_all_downloads(struct PodcastApp *app);
+
+/** Resume downloads previously paused by the user. */
+void podcast_controller_resume_all_downloads(struct PodcastApp *app);
+
+/** True if the download worker is alive but user-paused. */
+bool podcast_controller_is_download_paused(struct PodcastApp *app);
 
 /** Play a track (sets up queue starting from this track) */
 void podcast_controller_play_episode(struct PodcastApp *app, int track_id);

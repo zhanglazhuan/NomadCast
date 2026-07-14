@@ -32,6 +32,56 @@
 
 static const char *TAG = "podcast_ctrl";
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * Controller private context — allocated on init, freed on deinit.
+ * All mutable state lives here; no static globals.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+#define DL_DONE_RING         32
+#define RSS_BLACKLIST_MAX     32
+
+/* ── Download worker state ──────────────────────────────────────────── */
+typedef struct {
+    TaskHandle_t      task_handle;
+    SemaphoreHandle_t sem;
+    bool              running;
+    volatile int      speed_bps;
+    volatile bool     active;
+    volatile int      avg_bps;
+    volatile int      cur_remaining;
+    volatile int      bytes_per_audio_sec;
+    volatile bool     status_dirty;
+    volatile int      current_task_id;
+    volatile bool     abort_current;
+    volatile bool     yield_to_audio;
+    volatile bool     user_paused;
+    volatile int      done_ids[DL_DONE_RING];
+    volatile int      done_head;
+    volatile int      done_tail;
+} DownloadCtx;
+
+/* ── Controller private context ─────────────────────────────────────── */
+typedef struct PodcastCtrlCtx {
+    /* RSS feed bridge */
+    char       feed_url[2048];
+    rss_feed_t feed_result;
+    bool       feed_pending, feed_done, feed_ok;
+    int        feed_channel_id;
+    int        rss_blacklist[RSS_BLACKLIST_MAX];
+    int        rss_blacklist_count;
+    /* Download worker */
+    DownloadCtx dl;
+} PodcastCtrlCtx;
+
+extern PodcastApp g_podcast_app;
+
+/* Helper: get ctx from app */
+static inline PodcastCtrlCtx *ctl_ctx(struct PodcastApp *app) {
+    return app && app->controller ? app->controller->ctx : NULL;
+}
+
+/* ── Helpers ──────────────────────────────────────────────────────────── */
+
 static void s_strcpy(char *dst, const char *src, size_t sz) {
     if (sz > 0) { strncpy(dst, src ? src : "", sz - 1); dst[sz - 1] = '\0'; }
 }
@@ -93,48 +143,48 @@ static channel_category_t map_genre(const char *genre)
 
 /* ── RSS fetch bridge ────────────────────────────────────────────────── */
 
-static char      g_feed_url[2048];
-static rss_feed_t g_feed_result;
-static bool       g_feed_pending, g_feed_done, g_feed_ok;
-static int        g_feed_channel_id = 0;
-
-#define RSS_BLACKLIST_MAX 32
-static int g_rss_blacklist[RSS_BLACKLIST_MAX];
-static int g_rss_blacklist_count = 0;
-
-static bool rss_is_blacklisted(int channel_id) {
-    for (int i = 0; i < g_rss_blacklist_count; i++)
-        if (g_rss_blacklist[i] == channel_id) return true;
+static bool rss_is_blacklisted(PodcastCtrlCtx *ctx, int channel_id) {
+    for (int i = 0; i < ctx->rss_blacklist_count; i++)
+        if (ctx->rss_blacklist[i] == channel_id) return true;
     return false;
 }
 
-static void rss_blacklist_add(int channel_id) {
-    if (rss_is_blacklisted(channel_id)) return;
-    if (g_rss_blacklist_count >= RSS_BLACKLIST_MAX) return;
-    g_rss_blacklist[g_rss_blacklist_count++] = channel_id;
+static void rss_blacklist_add(PodcastCtrlCtx *ctx, int channel_id) {
+    if (rss_is_blacklisted(ctx, channel_id)) return;
+    if (ctx->rss_blacklist_count >= RSS_BLACKLIST_MAX) return;
+    ctx->rss_blacklist[ctx->rss_blacklist_count++] = channel_id;
     ESP_LOGW(TAG, "Channel %d blacklisted (RSS unreachable)", channel_id);
 }
 
-bool g_rss_done(void) { return g_feed_done; }
-bool g_rss_ok(void)   { return g_feed_ok; }
-rss_feed_t *g_rss_result(void) { return &g_feed_result; }
-int g_rss_channel_id(void) { return g_feed_channel_id; }
+bool g_rss_done(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->feed_done : false;
+}
+bool g_rss_ok(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->feed_ok : false;
+}
+rss_feed_t *g_rss_result(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? &ctx->feed_result : NULL;
+}
+int g_rss_channel_id(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->feed_channel_id : 0;
+}
 
 void controller_rss_reparse(int offset, int limit) {
-    /* On ESP32, all episodes are imported from the proxy server JSON
-     * in controller_process_rss().  Re-parsing is a no-op — the view
-     * reads from current_channel_episodes in the model directly. */
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    if (!ctx) return;
     (void)offset; (void)limit;
-    g_feed_done = true;
-    g_feed_ok = true;
+    ctx->feed_done = true;
+    ctx->feed_ok = true;
 }
 
 /* ── WiFi event listener — updates podcast model net_state ──────────── */
 
-extern PodcastApp g_podcast_app;
-
 static void dl_resume_pending(PodcastApp *app);
-static void dl_worker_start(void);
+static void dl_worker_start(PodcastApp *app);
 
 static void on_wifi_event(app_event_t event, const void *data)
 {
@@ -166,12 +216,35 @@ void podcast_controller_init(struct PodcastApp *app) {
     cJSON_InitHooks(&psram_hooks);
 
     app->controller = (PodcastController *)calloc(1, sizeof(PodcastController));
+
+    /* Allocate private context — all mutable state lives here, freed on deinit */
+    PodcastCtrlCtx *ctx = (PodcastCtrlCtx *)calloc(1, sizeof(PodcastCtrlCtx));
+    ctx->dl.current_task_id = -1;
+    app->controller->ctx = ctx;
+
     backend_init();
     app_event_register(on_wifi_event);
 }
 
 void podcast_controller_deinit(struct PodcastApp *app) {
     if (app->controller) {
+        PodcastCtrlCtx *ctx = app->controller->ctx;
+        /* Stop download worker */
+        if (ctx) {
+            ctx->dl.running = false;
+            if (ctx->dl.sem) xSemaphoreGive(ctx->dl.sem);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            if (ctx->dl.task_handle) {
+                vTaskDelete(ctx->dl.task_handle);
+                ctx->dl.task_handle = NULL;
+            }
+            if (ctx->dl.sem) {
+                vSemaphoreDelete(ctx->dl.sem);
+                ctx->dl.sem = NULL;
+            }
+            free(ctx);
+            app->controller->ctx = NULL;
+        }
         backend_deinit();
         free(app->controller);
         app->controller = NULL;
@@ -288,51 +361,53 @@ bool podcast_controller_search(struct PodcastApp *app, const char *q) {
 /* ── Channel episodes ────────────────────────────────────────────────── */
 
 bool podcast_controller_fetch_channel_episodes(struct PodcastApp *app, int cid) {
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
     const Channel *ch = podcast_model_get_channel_by_id(app, cid);
-    if (!ch) return false;
+    if (!ctx || !ch) return false;
 
     /* Blacklist: skip HTTP fetch for channels that previously returned 502/unreachable */
-    if (rss_is_blacklisted(cid)) {
-        memset(&g_feed_result, 0, sizeof(g_feed_result));
-        s_strcpy(g_feed_result.error, "Feed unavailable (blacklisted)",
-                 sizeof(g_feed_result.error));
-        g_feed_done = true;
-        g_feed_ok = false;
-        g_feed_channel_id = cid;
+    if (rss_is_blacklisted(ctx, cid)) {
+        memset(&ctx->feed_result, 0, sizeof(ctx->feed_result));
+        s_strcpy(ctx->feed_result.error, "Feed unavailable (blacklisted)",
+                 sizeof(ctx->feed_result.error));
+        ctx->feed_done = true;
+        ctx->feed_ok = false;
+        ctx->feed_channel_id = cid;
         ESP_LOGI(TAG, "Channel %d blacklisted — skipping fetch", cid);
         return true;
     }
 
-    memset(&g_feed_result, 0, sizeof(g_feed_result));
-    g_feed_done = g_feed_ok = false;
-    g_feed_channel_id = cid;
+    memset(&ctx->feed_result, 0, sizeof(ctx->feed_result));
+    ctx->feed_done = ctx->feed_ok = false;
+    ctx->feed_channel_id = cid;
     if (ch->feed_url[0]) {
-        snprintf(g_feed_url, sizeof(g_feed_url), "%s", ch->feed_url);
+        snprintf(ctx->feed_url, sizeof(ctx->feed_url), "%s", ch->feed_url);
     } else {
-        snprintf(g_feed_url, sizeof(g_feed_url), "SEARCH:%s", ch->title);
+        snprintf(ctx->feed_url, sizeof(ctx->feed_url), "SEARCH:%s", ch->title);
     }
-    g_feed_pending = true;
+    ctx->feed_pending = true;
     return true;
 }
 
 void controller_process_rss(void) {
-    if (!g_feed_pending) return;
-    g_feed_pending = false;
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    if (!ctx || !ctx->feed_pending) return;
+    ctx->feed_pending = false;
 
-    if (strncmp(g_feed_url, "SEARCH:", 7) == 0) {
+    if (strncmp(ctx->feed_url, "SEARCH:", 7) == 0) {
         char cc[8]; podcast_country(cc, sizeof(cc));
-        bk_channel_t *r = NULL; int n = backend_search_podcasts_sync(&r, g_feed_url + 7, cc, 3);
+        bk_channel_t *r = NULL; int n = backend_search_podcasts_sync(&r, ctx->feed_url + 7, cc, 3);
         if (r && n > 0) {
             for (int i = 0; i < n; i++) {
                 if (r[i].feed_url[0]) {
-                    snprintf(g_feed_url, sizeof(g_feed_url), "%s", r[i].feed_url);
-                    free(r); g_feed_pending = true; return;
+                    snprintf(ctx->feed_url, sizeof(ctx->feed_url), "%s", r[i].feed_url);
+                    free(r); ctx->feed_pending = true; return;
                 }
             }
             free(r);
         }
-        g_feed_done = true; g_feed_ok = false;
-        rss_blacklist_add(g_feed_channel_id);
+        ctx->feed_done = true; ctx->feed_ok = false;
+        rss_blacklist_add(ctx, ctx->feed_channel_id);
         return;
     }
 
@@ -343,23 +418,23 @@ void controller_process_rss(void) {
      */
     {
         char url[2560];
-        const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, g_feed_channel_id);
+        const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, ctx->feed_channel_id);
         int col_id = ch ? ch->collection_id : 0;
         snprintf(url, sizeof(url),
                  "%s/api/episodes?feed_url=%s&collection_id=%d",
-                 PODCAST_SERVER, g_feed_url, col_id);
+                 PODCAST_SERVER, ctx->feed_url, col_id);
         int st, len;
         char *body = http_get_sync(url, &st, &len);
-        memset(&g_feed_result, 0, sizeof(g_feed_result));
+        memset(&ctx->feed_result, 0, sizeof(ctx->feed_result));
 
         if (!body) {
             const char *detail = http_last_error();
-            s_strcpy(g_feed_result.error,
+            s_strcpy(ctx->feed_result.error,
                      detail && detail[0] ? detail : "Server unreachable",
-                     sizeof(g_feed_result.error));
-            g_feed_ok = false;
-            g_feed_done = true;
-            rss_blacklist_add(g_feed_channel_id);
+                     sizeof(ctx->feed_result.error));
+            ctx->feed_ok = false;
+            ctx->feed_done = true;
+            rss_blacklist_add(ctx, ctx->feed_channel_id);
             return;
         }
 
@@ -370,17 +445,17 @@ void controller_process_rss(void) {
             cJSON *root = cJSON_Parse(body);
             if (root) {
                 cJSON *e = cJSON_GetObjectItem(root, "error");
-                s_strcpy(g_feed_result.error,
+                s_strcpy(ctx->feed_result.error,
                          e && e->valuestring ? e->valuestring : "Server error",
-                         sizeof(g_feed_result.error));
+                         sizeof(ctx->feed_result.error));
                 cJSON_Delete(root);
             } else {
-                s_strcpy(g_feed_result.error, "Server error", sizeof(g_feed_result.error));
+                s_strcpy(ctx->feed_result.error, "Server error", sizeof(ctx->feed_result.error));
             }
             http_free_response_body(body);
-            g_feed_ok = false;
-            g_feed_done = true;
-            rss_blacklist_add(g_feed_channel_id);
+            ctx->feed_ok = false;
+            ctx->feed_done = true;
+            rss_blacklist_add(ctx, ctx->feed_channel_id);
             return;
         }
 
@@ -394,85 +469,40 @@ void controller_process_rss(void) {
             cJSON *eps = cJSON_GetObjectItem(root, "episodes");
             int n = eps ? cJSON_GetArraySize(eps) : 0;
             if (n > RSS_MAX_EPISODES) n = RSS_MAX_EPISODES;
-            g_feed_result.episode_count = n;
+            ctx->feed_result.episode_count = n;
             for (int i = 0; i < n; i++) {
                 cJSON *ep = cJSON_GetArrayItem(eps, i);
-                rss_episode_t *re = &g_feed_result.episodes[i];
+                rss_episode_t *re = &ctx->feed_result.episodes[i];
                 js_str(ep, "title", re->title, sizeof(re->title));
                 js_str(ep, "audio_url", re->audio_url, sizeof(re->audio_url));
                 js_str(ep, "published", re->pub_date, sizeof(re->pub_date));
                 js_str(ep, "duration", re->duration, sizeof(re->duration));
                 js_str(ep, "description", re->description, sizeof(re->description));
             }
-            g_feed_result.episode_count = n;
+            ctx->feed_result.episode_count = n;
 
             /* Use server-provided total for pagination, fall back to
              * episode_count if the server doesn't include it. */
             cJSON *total_json = cJSON_GetObjectItem(root, "total");
             if (total_json && total_json->type == cJSON_Number)
-                g_feed_result.total_episodes = (int)total_json->valuedouble;
+                ctx->feed_result.total_episodes = (int)total_json->valuedouble;
             else
-                g_feed_result.total_episodes = n;
+                ctx->feed_result.total_episodes = n;
 
-            g_feed_ok = true;
+            ctx->feed_ok = true;
             cJSON_Delete(root);
         } else {
-            g_feed_ok = false;
+            ctx->feed_ok = false;
         }
         http_free_response_body(body);
-        g_feed_done = true;
+        ctx->feed_done = true;
     }
 }
 
 /* ── Download worker ────────────────────────────────────────────────────── */
 
 #define DL_BASE_PATH    "/sdcard/.podcast/downloads"
-
-static TaskHandle_t  g_dl_task_handle = NULL;
-static SemaphoreHandle_t g_dl_sem = NULL;   /* wake signal: "there may be PENDING work" */
-static bool          g_dl_running = false;
-
-/* Live download speed shared to the status bar. */
-static volatile int  g_dl_speed_bps = 0;
-static volatile bool g_dl_active    = false;
-
-/* ── ETA telemetry (measured throughput) ────────────────────────────────────
- * The download-task page estimates time-left as (remaining bytes / avg speed)
- * instead of a hard-coded duration multiplier. All values are updated on CPU1
- * (worker) and read on CPU0 (LVGL); 32-bit aligned int access is atomic on the
- * Xtensa core, matching the existing lock-free stance for g_dl_speed_bps. */
-static volatile int  g_dl_avg_bps            = 0;  /* EMA of measured speed (B/s) */
-static volatile int  g_dl_cur_remaining      = 0;  /* in-flight bytes left (0=idle/unknown) */
-static volatile int  g_dl_bytes_per_audio_sec = 0; /* learned file B per audio-second */
-
-/* Set by the worker (CPU1) when a task changes to a non-success terminal state
- * (FAILED); polled + cleared by controller_process_download (CPU0) to fire a UI
- * refresh. Completions use the done-ring instead, so this stays failure-only and
- * never double-refreshes a success. */
-static volatile bool g_dl_status_dirty       = false;
-
-/* Retry a transient transfer failure this many times before giving up. Connect
- * aborts (ESP_ERR_HTTP_CONNECT) are usually momentary Wi-Fi/proxy hiccups. */
 #define DL_MAX_ATTEMPTS 3
-
-/* Cancellation of the in-flight transfer. The worker publishes the task_id it
- * is actively downloading; a cancel request sets g_dl_abort_current, which
- * dl_progress_cb reports back to http_download_to_file to stop the transfer. */
-static volatile int  g_dl_current_task_id = -1;
-static volatile bool g_dl_abort_current   = false;
-/* Playback priority: internal DRAM can't hold audio decode + streaming download
- * + SD DMA at once (sdmmc "not enough mem"). When audio is playing, the in-flight
- * download is aborted and kept PENDING; it resumes after playback stops.
- * dl_progress_cb sets this when it detects playback mid-transfer. */
-static volatile bool g_dl_yield_to_audio  = false;
-
-/* Completed-download hand-off ring (worker CPU1 → controller_process_download
- * CPU0). Single-producer / single-consumer; carries only the task_id so the
- * LVGL thread can fire the completion event + add to the local cache. */
-#define DL_DONE_RING    32
-static volatile int  g_dl_done_ids[DL_DONE_RING];
-static volatile int  g_dl_done_head = 0;   /* advanced by worker (producer) */
-static volatile int  g_dl_done_tail = 0;   /* advanced by process_download (consumer) */
 
 /* NOTE: the download worker (CPU1) reads/writes model->download_tasks directly —
  * download_tasks (loaded from the task_store files) is the single source of
@@ -488,22 +518,25 @@ static int dl_find_index(PodcastModel *m, int task_id) {
     return -1;
 }
 
+/* Callback context — set by the worker before http_download_to_file.
+ * Must be static: dl_progress_cb signature is fixed by hal.h. */
+static DownloadCtx *g_dl_cb_ctx = NULL;
+
 static bool dl_progress_cb(int bytes_done, int total_bytes, int speed_bps)
 {
-    g_dl_speed_bps = speed_bps;
-
-    /* EMA-smooth the bursty instantaneous speed (3:1) → a stable ETA divisor.
-     * Carried across tasks: throughput is a property of the link, not the file. */
+    DownloadCtx *dl = g_dl_cb_ctx;
+    if (!dl) return true;
+    dl->speed_bps = speed_bps;
     if (speed_bps > 0)
-        g_dl_avg_bps = g_dl_avg_bps > 0 ? (g_dl_avg_bps * 3 + speed_bps) / 4
-                                        : speed_bps;
+        dl->avg_bps = dl->avg_bps > 0 ? (dl->avg_bps * 3 + speed_bps) / 4
+                                      : speed_bps;
 
     if (total_bytes > 0) {
         int rem = total_bytes - bytes_done;
-        g_dl_cur_remaining = rem > 0 ? rem : 0;
+        dl->cur_remaining = rem > 0 ? rem : 0;
 
         PodcastModel *m = g_podcast_app.model;
-        int idx = m ? dl_find_index(m, g_dl_current_task_id) : -1;
+        int idx = m ? dl_find_index(m, dl->current_task_id) : -1;
         if (idx >= 0) {
             DownloadTask *t = &m->download_tasks[idx];
             /* Live % — RAM only; persisted at completion, not every 500ms tick
@@ -512,17 +545,17 @@ static bool dl_progress_cb(int bytes_done, int total_bytes, int speed_bps)
             /* Learn bytes-per-audio-second to size queued (not-yet-open) tasks. */
             if (t->duration_sec > 0) {
                 int r = total_bytes / t->duration_sec;
-                g_dl_bytes_per_audio_sec = g_dl_bytes_per_audio_sec > 0
-                    ? (g_dl_bytes_per_audio_sec * 3 + r) / 4 : r;
+                dl->bytes_per_audio_sec = dl->bytes_per_audio_sec > 0
+                    ? (dl->bytes_per_audio_sec * 3 + r) / 4 : r;
             }
         }
     } else {
-        g_dl_cur_remaining = 0;   /* chunked / size unknown → ETA falls back to estimate */
+        dl->cur_remaining = 0;   /* chunked / size unknown → ETA falls back to estimate */
     }
 
-    if (g_dl_abort_current) return false;   /* user cancel */
-    if (audio_player_is_active()) {         /* pipeline holds the memory → yield */
-        g_dl_yield_to_audio = true;
+    if (dl->abort_current) return false;   /* user cancel */
+    if (audio_player_is_playing()) {        /* playback started → yield */
+        dl->yield_to_audio = true;
         return false;                       /* http_download_to_file aborts + unlinks partial */
     }
     return true;
@@ -551,37 +584,51 @@ static int dl_take_next_pending(PodcastApp *app, char *url, int url_sz,
 }
 
 /* Producer side of the completion ring (worker/CPU1). */
-static void dl_done_push(int task_id)
+static void dl_done_push(PodcastCtrlCtx *ctx, int task_id)
 {
-    int nh = (g_dl_done_head + 1) % DL_DONE_RING;
-    if (nh == g_dl_done_tail) return;   /* ring full — consumer lagging; drop notify */
-    g_dl_done_ids[g_dl_done_head] = task_id;
-    g_dl_done_head = nh;
+    if (!ctx) return;
+    int nh = (ctx->dl.done_head + 1) % DL_DONE_RING;
+    if (nh == ctx->dl.done_tail) return;
+    ctx->dl.done_ids[ctx->dl.done_head] = task_id;
+    ctx->dl.done_head = nh;
 }
 
 static void dl_worker_task(void *arg)
 {
-    (void)arg;
+    PodcastApp *app = (PodcastApp *)arg;
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) { vTaskDelete(NULL); return; }
     /* Static scratch — only the worker touches these, one transfer at a time.
      * Kept off the 10KB stack (url 1KB + path 0.5KB). */
     static char s_url[1024];
     static char s_path[512];
 
-    while (g_dl_running) {
-        /* Wait for a wake, timeout 5s to re-scan / check the running flag. */
-        xSemaphoreTake(g_dl_sem, pdMS_TO_TICKS(5000));
+    while (ctx->dl.running) {
+        xSemaphoreTake(ctx->dl.sem, pdMS_TO_TICKS(5000));
 
         /* Drain all PENDING tasks this wake (serial — one transfer at a time).
          * dl_take_next_pending re-scans the model each iteration, so a task
          * added mid-drain is picked up here too. */
-        while (g_dl_running) {
+        while (ctx->dl.running) {
             PodcastApp *app = &g_podcast_app;
             if (!app || !app->model) break;
 
-            /* Playback priority: don't START a download while the audio pipeline
-             * is alive (playing/paused/tearing down). Only resumes once it's fully
-             * torn down and the internal DRAM is freed. Tasks stay PENDING. */
-            if (audio_player_is_active()) break;
+            /* Priority: Display > Playback > Download.
+             * If audio is actively PLAYING, don't steal its memory — wait.
+             * If paused, release the pipeline (position saved) to free DRAM. */
+            if (audio_player_is_playing()) {
+                break;  /* playback is running — retry later */
+            }
+            if (audio_player_is_active()) {
+                audio_player_release();   /* paused → free memory for download */
+                vTaskDelay(pdMS_TO_TICKS(300));
+            }
+
+            /* User-requested pause — wait for resume signal */
+            if (ctx->dl.user_paused) {
+                xSemaphoreTake(ctx->dl.sem, pdMS_TO_TICKS(2000));
+                continue;
+            }
 
             int task_id = dl_take_next_pending(app, s_url, sizeof(s_url),
                                                      s_path, sizeof(s_path));
@@ -589,27 +636,29 @@ static void dl_worker_task(void *arg)
 
             ESP_LOGI(TAG, "dl: downloading task %d → %s", task_id, s_path);
 
-            g_dl_current_task_id = task_id;
-            g_dl_abort_current   = false;
-            g_dl_yield_to_audio  = false;
-            g_dl_active          = true;
+            ctx->dl.current_task_id = task_id;
+            ctx->dl.abort_current   = false;
+            ctx->dl.yield_to_audio  = false;
+            ctx->dl.active          = true;
             /* Retry transient failures (connect abort, dropped socket) a few
              * times before marking FAILED — but stop immediately if the user
-             * cancelled (g_dl_abort_current) or audio started (g_dl_yield_to_audio). */
+             * cancelled (ctx->dl.abort_current) or audio started (ctx->dl.yield_to_audio). */
             bool ok = false;
+            g_dl_cb_ctx = &ctx->dl;
             for (int attempt = 1; attempt <= DL_MAX_ATTEMPTS; attempt++) {
                 ok = http_download_to_file(s_url, s_path, dl_progress_cb);
-                if (ok || g_dl_abort_current || g_dl_yield_to_audio) break;
+                if (ok || ctx->dl.abort_current || ctx->dl.yield_to_audio) break;
                 if (attempt < DL_MAX_ATTEMPTS) {
                     ESP_LOGW(TAG, "dl: task %d attempt %d/%d failed — retrying",
                              task_id, attempt, DL_MAX_ATTEMPTS);
                     vTaskDelay(pdMS_TO_TICKS(2000));
                 }
             }
-            g_dl_active          = false;
-            g_dl_current_task_id = -1;
-            g_dl_speed_bps       = 0;
-            g_dl_cur_remaining   = 0;
+            g_dl_cb_ctx             = NULL;
+            ctx->dl.active          = false;
+            ctx->dl.current_task_id = -1;
+            ctx->dl.speed_bps       = 0;
+            ctx->dl.cur_remaining   = 0;
 
             /* Re-find by id — the task may have been cancelled/deleted while the
              * transfer ran (its model entry is gone). */
@@ -626,9 +675,9 @@ static void dl_worker_task(void *arg)
                 app->model->download_tasks[idx].status   = DOWNLOAD_STATUS_COMPLETED;
                 app->model->download_tasks[idx].progress = 100;
                 task_store_update(app, task_id);
-                dl_done_push(task_id);   /* hand off to CPU0 for event + cache */
+                dl_done_push(ctx, task_id);   /* hand off to CPU0 for event + cache */
                 ESP_LOGI(TAG, "dl: task %d OK", task_id);
-            } else if (g_dl_yield_to_audio) {
+            } else if (ctx->dl.yield_to_audio) {
                 /* Paused for playback: keep PENDING (in RAM only — avoid an SD
                  * write while audio holds the memory) and stop draining. Resumes
                  * on the next re-scan after playback ends; on reboot dl_resume
@@ -641,7 +690,7 @@ static void dl_worker_task(void *arg)
             } else {
                 app->model->download_tasks[idx].status = DOWNLOAD_STATUS_FAILED;
                 task_store_update(app, task_id);
-                g_dl_status_dirty = true;   /* nudge CPU0 to refresh the stats card */
+                ctx->dl.status_dirty = true;   /* nudge CPU0 to refresh the stats card */
                 ESP_LOGW(TAG, "dl: task %d FAILED after %d attempts",
                          task_id, DL_MAX_ATTEMPTS);
             }
@@ -654,13 +703,35 @@ static void dl_worker_task(void *arg)
 
 void podcast_controller_resume_downloads(struct PodcastApp *app) { dl_resume_pending(app); }
 
+void podcast_controller_pause_all_downloads(struct PodcastApp *app) {
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return;
+    ctx->dl.user_paused = true;
+    ESP_LOGI(TAG, "dl: user paused downloads");
+}
+
+void podcast_controller_resume_all_downloads(struct PodcastApp *app) {
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return;
+    ctx->dl.user_paused = false;
+    if (ctx->dl.sem) xSemaphoreGive(ctx->dl.sem);
+    ESP_LOGI(TAG, "dl: user resumed downloads");
+}
+
+bool podcast_controller_is_download_paused(struct PodcastApp *app) {
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    return ctx ? ctx->dl.user_paused : false;
+}
+
 static void dl_resume_pending(PodcastApp *app)
 {
     if (!app || !app->model) return;
     PodcastModel *m = app->model;
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return;
 
     /* Ensure the worker is running */
-    if (!g_dl_running) dl_worker_start();
+    if (!ctx->dl.running) dl_worker_start(app);
 
     int pending = 0;
     for (int i = 0; i < m->download_task_count; i++) {
@@ -677,44 +748,52 @@ static void dl_resume_pending(PodcastApp *app)
     }
 
     /* One wake is enough — the worker drains every PENDING task it finds. */
-    if (pending > 0 && g_dl_sem) {
-        xSemaphoreGive(g_dl_sem);
+    if (pending > 0 && ctx->dl.sem) {
+        xSemaphoreGive(ctx->dl.sem);
         ESP_LOGI(TAG, "dl_resume: %d pending task(s), worker woken", pending);
     }
 }
 
-static void dl_worker_start(void)
+static void dl_worker_start(PodcastApp *app)
 {
-    if (g_dl_running) return;
-    g_dl_running = true;
-    /* Counting semaphore used purely as a wake signal — the worker rescans
-     * download_tasks on every wake, so surplus tokens only cause harmless
-     * rescans and no wake is ever lost. */
-    g_dl_sem = xSemaphoreCreateCounting(64, 0);
-    /* Pin to CPU 1 — keeps SD card I/O and TCP stack callbacks off CPU 0
-     * where LVGL rendering runs, avoiding audio dropouts and UI jank.
-     * 10KB: func locals ~2.5KB + esp_http_client ~2KB + fwrite buf ~4KB
-     * (url/path scratch are static, not on the stack). */
-    xTaskCreatePinnedToCore(dl_worker_task, "podcast_dl", 10240, NULL,
-                            1, &g_dl_task_handle, 1);
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return;
+    if (ctx->dl.running) return;
+    ctx->dl.running = true;
+    ctx->dl.sem = xSemaphoreCreateCounting(64, 0);
+    xTaskCreatePinnedToCore(dl_worker_task, "podcast_dl", 10240, app,
+                            1, &ctx->dl.task_handle, 1);
 }
 
 /* ── ETA telemetry getters (read by the download-task page on the LVGL thread) ── */
-int podcast_dl_avg_speed_bps(void)           { return g_dl_avg_bps; }
-int podcast_dl_current_task_id(void)         { return g_dl_current_task_id; }
-int podcast_dl_current_remaining_bytes(void) { return g_dl_cur_remaining; }
-int podcast_dl_bytes_per_audio_sec(void)     { return g_dl_bytes_per_audio_sec; }
+int podcast_dl_avg_speed_bps(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->dl.avg_bps : 0;
+}
+int podcast_dl_current_task_id(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->dl.current_task_id : -1;
+}
+int podcast_dl_current_remaining_bytes(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->dl.cur_remaining : 0;
+}
+int podcast_dl_bytes_per_audio_sec(void) {
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    return ctx ? ctx->dl.bytes_per_audio_sec : 0;
+}
 
 void controller_process_download(void)
 {
     PodcastApp *app = &g_podcast_app;
-    if (!app || !app->model) return;
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!app || !app->model || !ctx) return;
 
     /* Push live download state to the global status bar (LVGL thread) */
     lv_status_bar_t *sb = lv_status_bar_get();
     if (sb) {
-        bool active = g_dl_active;
-        lv_status_bar_set_download_speed(sb, active ? g_dl_speed_bps : -1);
+        bool active = ctx->dl.active;
+        lv_status_bar_set_download_speed(sb, active ? ctx->dl.speed_bps : -1);
         lv_status_bar_set_download_active(sb, active);
     }
 
@@ -723,9 +802,9 @@ void controller_process_download(void)
      * add the finished episode to the local cache. Looked up by task_id from the
      * model (the single source of truth). */
     PodcastModel *m = app->model;
-    while (g_dl_done_tail != g_dl_done_head) {
-        int task_id = g_dl_done_ids[g_dl_done_tail];
-        g_dl_done_tail = (g_dl_done_tail + 1) % DL_DONE_RING;
+    while (ctx->dl.done_tail != ctx->dl.done_head) {
+        int task_id = ctx->dl.done_ids[ctx->dl.done_tail];
+        ctx->dl.done_tail = (ctx->dl.done_tail + 1) % DL_DONE_RING;
 
         int idx = dl_find_index(m, task_id);
         if (idx < 0) continue;   /* deleted before we processed the notification */
@@ -739,8 +818,8 @@ void controller_process_download(void)
 
     /* A failure (set by the worker) never reaches the done-ring, so refresh the
      * UI here so the stats card leaves its stale "downloading" snapshot. */
-    if (g_dl_status_dirty) {
-        g_dl_status_dirty = false;
+    if (ctx->dl.status_dirty) {
+        ctx->dl.status_dirty = false;
         app_event_fire(APP_EVENT_DOWNLOAD_CHANGED, NULL);
     }
 }
@@ -755,6 +834,8 @@ void podcast_controller_cancel_download_tasks(struct PodcastApp *app, const int 
 {
     if (!app || !app->model || n <= 0) return;
     PodcastModel *m = app->model;
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return;
 
     for (int k = 0; k < n; k++) {
         int tid = ids[k];
@@ -765,11 +846,11 @@ void podcast_controller_cancel_download_tasks(struct PodcastApp *app, const int 
         download_status_t s = t->status;
         if (s != DOWNLOAD_STATUS_PENDING && s != DOWNLOAD_STATUS_DOWNLOADING) continue;
 
-        if (g_dl_active && g_dl_current_task_id == tid) {
+        if (ctx->dl.active && ctx->dl.current_task_id == tid) {
             /* In-flight: signal the worker to abort. It stops the transfer,
              * unlinks its own partial file, and (finding the record gone) skips
              * the status write. */
-            g_dl_abort_current = true;
+            ctx->dl.abort_current = true;
             ESP_LOGI(TAG, "cancel: aborting active download task %d", tid);
         } else {
             /* PENDING (not started yet): remove any partial file left on disk. */
@@ -966,13 +1047,15 @@ bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char 
     const char *title, const char *channel_title, int ch_id, int ep_id, int dur, int col_id)
 {
     if (!url || !url[0] || !title) return false;
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) return false;
 
     /* Build the SD destination path (shared with playback lookup). */
     char path[1536];
     podcast_local_audio_path(channel_title, title, path, sizeof(path));
 
     /* Ensure download worker is running */
-    if (!g_dl_running) dl_worker_start();
+    if (!ctx->dl.running) dl_worker_start(app);
 
     /* Route audio download through the proxy server. */
     char proxy_url[2560];
@@ -989,7 +1072,7 @@ bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char 
     }
 
     /* Wake the worker — it scans download_tasks for PENDING and downloads. */
-    if (g_dl_sem) xSemaphoreGive(g_dl_sem);
+    if (ctx->dl.sem) xSemaphoreGive(ctx->dl.sem);
     ESP_LOGI(TAG, "dl: task %d created '%s' → %s", task_id, title, path);
     return true;
 }

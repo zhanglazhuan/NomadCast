@@ -113,7 +113,8 @@ static esp_lcd_panel_handle_t display_init(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io, &panel_cfg, &panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+    /* Display stays OFF until launcher renders — prevents boot garbage */
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, false));
     return panel;
 }
 
@@ -133,7 +134,8 @@ static void hw_reset(void)
 }
 
 /* ---- Touch (GT911 via drivers/gt911, interrupt-driven) ---- */
-static gt911_dev_t *s_gt911_dev = NULL;
+static gt911_dev_t    *s_gt911_dev  = NULL;
+static gt911_config_t  s_gt911_cfg;  /* preserved for sleep→wake re-init */
 static lv_indev_data_t s_touch_data;
 
 /* Touch release debounce — GT911 may register brief release/press jitter
@@ -254,9 +256,38 @@ extern "C" void app_main(void)
     lv_theme_default_init(disp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED),
                           LV_THEME_DEFAULT_DARK, g_cjk_font);
 
+    /* [3.5] Boot splash — "NomadCast" logo centered, shown while slow init runs */
+    static lv_obj_t *s_boot_splash = NULL;
+    {
+        s_boot_splash = lv_obj_create(NULL);  /* NULL parent = new screen */
+        lv_obj_set_style_bg_color(s_boot_splash, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(s_boot_splash, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(s_boot_splash, 0, 0);
+
+        lv_obj_t *logo = lv_label_create(s_boot_splash);
+        lv_label_set_text(logo, "NomadCast");
+        lv_obj_set_style_text_color(logo, lv_color_white(), 0);
+        lv_obj_set_style_text_font(logo, &lv_font_montserrat_20, 0);
+        lv_obj_align(logo, LV_ALIGN_CENTER, 0, -12);
+
+        lv_obj_t *sub = lv_label_create(s_boot_splash);
+        lv_label_set_text(sub, "Starting...");
+        lv_obj_set_style_text_color(sub, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, 0);
+        lv_obj_align(sub, LV_ALIGN_CENTER, 0, 16);
+
+        lv_scr_load(s_boot_splash);
+
+        /* Flush + turn on display now — user sees the logo immediately */
+        lv_timer_handler();
+        vTaskDelay(pdMS_TO_TICKS(50));
+        esp_lcd_panel_disp_on_off(s_panel, true);
+        ESP_LOGI(TAG, "Boot splash shown");
+    }
+
     /* [4] Touch (GT911) — interrupt-driven via drivers/gt911 */
     static lv_indev_t *s_touch_indev = NULL;
-    gt911_config_t gt911_cfg = {
+    s_gt911_cfg = (gt911_config_t){
         .rst_pin       = PIN_TP_RST,
         .int_pin       = PIN_TP_INT,
         .i2c_sda_pin   = PIN_I2C_SDA,
@@ -266,12 +297,12 @@ extern "C" void app_main(void)
         .max_height    = LCD_H,
         .use_interrupt = true,
     };
-    if (gt911_init(&gt911_cfg, &s_gt911_dev) == ESP_OK) {
+    if (gt911_init(&s_gt911_cfg, &s_gt911_dev) == ESP_OK) {
         s_touch_indev = lv_indev_create();
         lv_indev_set_type(s_touch_indev, LV_INDEV_TYPE_POINTER);
         lv_indev_set_read_cb(s_touch_indev, lvgl_touch_read_cb);
         lv_indev_set_scroll_limit(s_touch_indev, 20); /* px; >20px = scroll, not click */
-        if (gt911_cfg.use_interrupt) {
+        if (s_gt911_cfg.use_interrupt) {
             gt911_register_isr(s_gt911_dev, on_gt911_touch, NULL);
         }
         /* ES8156 codec shares GT911's I2C0 bus — enable volume control. */
@@ -300,7 +331,20 @@ extern "C" void app_main(void)
         esp_lcd_panel_init(s_panel);
         esp_lcd_panel_invert_color(s_panel, true);
         esp_lcd_panel_disp_on_off(s_panel, true);
-        ESP_LOGI(TAG, "Display re-initialized after wake");
+
+        /* Re-init GT911 touch — peripheral power was cut, registers lost */
+        if (s_gt911_dev) {
+            gt911_deinit(s_gt911_dev);
+            s_gt911_dev = NULL;
+        }
+        if (gt911_init(&s_gt911_cfg, &s_gt911_dev) == ESP_OK) {
+            if (s_gt911_cfg.use_interrupt) {
+                gt911_register_isr(s_gt911_dev, on_gt911_touch, NULL);
+            }
+            ESP_LOGI(TAG, "Touch re-initialized after wake");
+        } else {
+            ESP_LOGW(TAG, "Touch re-init failed after wake");
+        }
     });
 
     /* [6.6] Flash store — must be before any app reads settings */
@@ -391,6 +435,9 @@ extern "C" void app_main(void)
     app_manager_init();
     podcast_app_register();
     settings_app_register();
+
+    /* Replace boot splash with launcher home screen */
+    if (s_boot_splash) { lv_obj_del(s_boot_splash); s_boot_splash = NULL; }
     launcher_home_ui();
     launcher_gesture_init(s_touch_indev);
 

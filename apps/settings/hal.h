@@ -23,6 +23,7 @@ typedef struct {
     bool    secured;           /* true if auth != OPEN */
     uint8_t bssid[6];          /* BSSID from scan — for direct connect */
     uint8_t channel;           /* primary channel */
+    int8_t  rssi;             /* raw RSSI in dBm (e.g. -45) */
 } hal_wifi_ap_t;
 
 /* ── WiFi lifecycle ─────────────────────────────────────────────────────── */

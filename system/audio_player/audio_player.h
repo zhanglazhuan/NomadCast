@@ -52,6 +52,11 @@ bool audio_player_is_playing(void);
  *  again — is_playing goes false on pause/at natural end before teardown. */
 bool audio_player_is_active(void);
 
+/** Release pipeline memory without losing position (for download task).
+ *  After this, pause(false) will rebuild and seek to the saved position.
+ *  Safe to call even when not playing — no-op if pipeline is already gone. */
+void audio_player_release(void);
+
 #ifdef __cplusplus
 }
 #endif
