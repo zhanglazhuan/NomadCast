@@ -135,7 +135,11 @@ int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int li
                      "%s/api/charts/full?country=%s&limit=%d",
                      PODCAST_SERVER, country ? country : "cn", limit > 0 ? limit : 50);
             body = http_get_sync(url, &status, &body_len);
-            BK_LOGI("[BACKEND] chart HTTP status=%d body_len=%d\n", status, body_len);
+            if (status == 0) {
+                BK_LOGW("[BACKEND] chart: server unreachable\n");
+            } else {
+                BK_LOGI("[BACKEND] chart HTTP status=%d body_len=%d\n", status, body_len);
+            }
             if (!body || status != 200) {
                 if (body) http_free_response_body(body);
                 return 0;

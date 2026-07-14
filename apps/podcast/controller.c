@@ -199,16 +199,12 @@ bool podcast_controller_fetch_chart(struct PodcastApp *app)
 
     char cc[8]; podcast_country(cc, sizeof(cc));
 
-    /* Fetch top podcasts (up to 3 retries) */
-    for (int attempt = 0; attempt < 3; attempt++) {
-        count = backend_fetch_chart(&bk, cc, 50);
-        if (count > 0) break;
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
+    /* Single attempt — retrying a dead server wastes 15+ seconds each time */
+    count = backend_fetch_chart(&bk, cc, 50);
 
     if (count <= 0) {
         podcast_model_set_net_state(app, NET_STATE_ERROR,
-            "No network or server unavailable");
+            hal_wifi_is_connected() ? "Server unreachable" : "No network connection");
         ESP_LOGW(TAG, "fetch_chart: 0 channels");
         return false;
     }

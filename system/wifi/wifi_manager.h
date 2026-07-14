@@ -16,8 +16,8 @@
  * only the calling task blocks.
  */
 
-#ifndef ESP_WIFI_BSP_H
-#define ESP_WIFI_BSP_H
+#ifndef WIFI_MANAGER_H
+#define WIFI_MANAGER_H
 
 #include "esp_wifi.h"
 #include "esp_err.h"

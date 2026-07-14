@@ -16,7 +16,7 @@
  * task blocks — background tasks continue running.
  */
 
-#include "esp_wifi_bsp.h"
+#include "wifi_manager.h"
 
 #include <string.h>
 #include <stdio.h>

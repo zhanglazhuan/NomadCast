@@ -18,6 +18,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/events
     ${CMAKE_CURRENT_SOURCE_DIR}/system/ota
     ${CMAKE_CURRENT_SOURCE_DIR}/system/audio_player
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/wifi
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/settings
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/podcast
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/esp-adf/components
@@ -27,8 +28,8 @@ set(EXTRA_COMPONENT_DIRS
 # Board configs live in boards/<target>/ — currently esp32s3
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/boards/esp32s3)
 
-# Exclude conflicting ADF components and old C++ BSP
-set(EXCLUDE_COMPONENTS display touch_bsp i2c_bsp battery audio codec_board wifi board_leisound audio_board audio_hal display_service esp_peripherals audio_sal)
+# Exclude conflicting ADF components (vendor/esp-adf)
+set(EXCLUDE_COMPONENTS audio_board audio_hal display_service esp_peripherals audio_sal)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(NomadCast)

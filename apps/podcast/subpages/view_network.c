@@ -484,7 +484,8 @@ static void build_error(lv_obj_t* parent, const char* msg, NetworkPage* np) {
     lv_label_set_text(line1, msg ? msg : "Failed to load content");
     lv_obj_set_style_text_color(line1, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(line1, g_cjk_font, 0);
-    lv_obj_set_size(line1, 200, 24);
+    lv_obj_set_size(line1, 200, LV_SIZE_CONTENT);
+    lv_label_set_long_mode(line1, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(line1, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(line1, LV_ALIGN_CENTER, 0, -30);
 
