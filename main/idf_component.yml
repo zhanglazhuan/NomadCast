@@ -6,8 +6,9 @@ dependencies:
     public: true
 
   espressif/esp_codec_dev:
-    version: ~1.3.4
+    version: '*'
     public: true
+    override_path: '../vendor/esp-adf/components/esp_codec_dev'
   joltwallet/littlefs: '*'
   espressif/button: '*'
   espressif/esp_jrnl: '*'
