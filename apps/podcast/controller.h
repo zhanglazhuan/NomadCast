@@ -76,6 +76,9 @@ bool podcast_controller_load_network_content(struct PodcastApp *app);
  */
 bool podcast_controller_fetch_chart(struct PodcastApp *app);
 
+/** Fetch chart for a specific category (pass CHANNEL_CATEGORY_COUNT for all). */
+bool podcast_controller_fetch_chart_by_category(struct PodcastApp *app, int cat);
+
 /** Load more albums for a category */
 bool podcast_controller_load_more_channels(struct PodcastApp *app, channel_category_t cat);
 
@@ -119,6 +122,10 @@ typedef enum {
 } local_content_state_t;
 
 local_content_state_t podcast_controller_check_local_content(struct PodcastApp *app);
+
+/** Delete all local audio files and metadata for a channel (SD-card clean-up).
+ *  Called from the Local page after a left-swipe → confirm. */
+void podcast_controller_delete_channel_local(struct PodcastApp *app, int channel_id);
 
 /* ── Player ──────────────────────────────────────────────────────────────── */
 

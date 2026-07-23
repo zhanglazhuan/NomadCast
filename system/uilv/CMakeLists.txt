@@ -31,5 +31,5 @@ idf_component_register(
         "imgs/16x16/ic_schedule_16x16.c"
         "imgs/16x16/ic_stacks_16x16.c"
     INCLUDE_DIRS "framework" "widgets" "imgs/24x24" "imgs/40x40" "imgs/16x16"
-    REQUIRES lvgl clock events
+    REQUIRES lvgl clock events logs
 )

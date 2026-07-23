@@ -319,9 +319,11 @@ static void refresh_list(NetworkPageCtx* ctx, int cat) {
 static void on_dropdown_changed(lv_event_t* e) {
     NetworkPageCtx* ctx = lv_event_get_user_data(e);
     uint32_t sel = lv_dropdown_get_selected(lv_event_get_current_target_obj(e));
-    /* Dropdown: 0="全部", 1..N=category */
     ctx->active_cat = (sel == 0) ? CAT_ALL : (int)(sel - 1);
-    refresh_list(ctx, ctx->active_cat);
+
+    /* Fetch category-specific channels from server */
+    podcast_controller_fetch_chart_by_category(&g_podcast_app, ctx->active_cat);
+    /* View will refresh when polling timer detects NET_STATE_READY */
 }
 
 static void on_search_bar_clicked(lv_event_t* e) {

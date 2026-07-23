@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "page_navigator.h"
 #include "esp_log.h"
+#include "log_system.h"
 
 static const char *TAG = "nav";
 
@@ -66,6 +67,7 @@ void page_navigator_navigate_to(page_navigator_t *nav, app_handle_t app, int pag
 		lv_screen_load(new_screen);
 		if (old_screen) lv_obj_delete_async(old_screen);
 		ESP_LOGI(TAG, "navigated to page %d", page_id);
+		log_page_nav("push", "page");
 	} else {
 		ESP_LOGE(TAG, "builder returned NULL for page %d", page_id);
 	}
@@ -100,6 +102,7 @@ bool page_navigator_navigate_pop(page_navigator_t *nav, app_handle_t app)
 		lv_screen_load(new_screen);
 		if (old_screen) lv_obj_delete_async(old_screen);
 		ESP_LOGI(TAG, "popped to page %d", prev_id);
+		log_page_nav("pop", "page");
 		return true;
 	}
 	return false;

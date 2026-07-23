@@ -118,8 +118,8 @@ typedef bk_channels_cb_t bk_channels_cb_t;
 void backend_init(void);
 void backend_deinit(void);
 
-/** Fetch top podcasts chart. Returns malloc'd bk_channel_t array. */
-int backend_fetch_chart(bk_channel_t **out, const char *country, int limit);
+/** Fetch top podcasts chart. genre_id=0 for all, or Apple podcast genre ID. */
+int backend_fetch_chart(bk_channel_t **out, const char *country, int limit, int genre_id);
 
 /** Search Apple Podcasts. Returns malloc'd bk_channel_t array. */
 int backend_search_podcasts_sync(bk_channel_t **out, const char *keyword, const char *country, int limit);

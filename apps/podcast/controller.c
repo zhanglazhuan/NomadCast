@@ -265,20 +265,38 @@ bool podcast_controller_load_network_content(struct PodcastApp *app) {
     return true;
 }
 
+/* Apple Podcasts genre IDs mapped to our categories (primary genre per cat). */
+static int category_to_genre_id(channel_category_t cat) {
+    switch (cat) {
+        case CHANNEL_CATEGORY_NEWS_SOCIETY:   return 1310;  /* News */
+        case CHANNEL_CATEGORY_BUSINESS_TECH:  return 1316;  /* Technology */
+        case CHANNEL_CATEGORY_ARTS_HISTORY:   return 1301;  /* Arts */
+        case CHANNEL_CATEGORY_COMEDY_LIFE:    return 1325;  /* Leisure */
+        case CHANNEL_CATEGORY_CRIME_EDU:      return 1304;  /* Education */
+        default:                              return 0;
+    }
+}
+
 bool podcast_controller_fetch_chart(struct PodcastApp *app)
+{
+    return podcast_controller_fetch_chart_by_category(app, CHANNEL_CATEGORY_COUNT);
+}
+
+bool podcast_controller_fetch_chart_by_category(struct PodcastApp *app, int cat)
 {
     bk_channel_t *bk = NULL;
     int count = 0;
 
     char cc[8]; podcast_country(cc, sizeof(cc));
+    int genre_id = (cat >= 0 && cat < CHANNEL_CATEGORY_COUNT)
+                   ? category_to_genre_id((channel_category_t)cat) : 0;
 
-    /* Single attempt — retrying a dead server wastes 15+ seconds each time */
-    count = backend_fetch_chart(&bk, cc, 50);
+    count = backend_fetch_chart(&bk, cc, 50, genre_id);
 
     if (count <= 0) {
         podcast_model_set_net_state(app, NET_STATE_ERROR,
             hal_wifi_is_connected() ? "Server unreachable" : "No network connection");
-        ESP_LOGW(TAG, "fetch_chart: 0 channels");
+        ESP_LOGW(TAG, "fetch_chart: 0 channels (genre=%d)", genre_id);
         return false;
     }
 
@@ -1174,3 +1192,102 @@ local_content_state_t podcast_controller_check_local_content(struct PodcastApp *
 }
 
 void podcast_controller_poll(struct PodcastApp *a) { (void)a; }
+
+/* Delete a channel's local audio files on SD card + metadata.
+ * Called from the Local page when user left-swipes a channel and confirms. */
+void podcast_controller_delete_channel_local(struct PodcastApp *app, int channel_id)
+{
+    if (!app || !app->model) return;
+    PodcastModel *m = app->model;
+
+    /* 1. Find the channel */
+    const Channel *ch = NULL;
+    for (int i = 0; i < m->local_channel_count; i++) {
+        if (m->local_channels[i].id == channel_id) {
+            ch = &m->local_channels[i];
+            break;
+        }
+    }
+    if (!ch) return;
+
+    printf("[INF] delete_channel_local: '%s' (id=%d)\n", ch->title, channel_id);
+    fflush(stdout);
+
+    /* 2. Delete each episode's audio file + count them */
+    int deleted_files = 0;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        if (m->local_episodes[i].channel_id != channel_id) continue;
+
+        char audio_path[2048];
+        podcast_local_audio_path(ch->title, m->local_episodes[i].title,
+                                 audio_path, sizeof(audio_path));
+        if (remove(audio_path) == 0) {
+            printf("[INF] Deleted: %s\n", audio_path); fflush(stdout);
+            deleted_files++;
+        }
+    }
+
+    /* 3. Remove the channel directory (may fail if not empty — ignore) */
+    {
+        char ch_dir[1536];
+        char ch_safe[256];
+        snprintf(ch_safe, sizeof(ch_safe), "%s", ch->title);
+        for (char *p = ch_safe; *p; p++)
+            if (strchr("\\/:*?\"<>|", *p)) *p = '_';
+        snprintf(ch_dir, sizeof(ch_dir), DL_BASE_PATH "/%s", ch_safe);
+        remove(ch_dir);   /* best-effort; FATFS remove fails if dir not empty */
+    }
+
+    /* 4. Delete the bucket metadata file */
+    {
+        char meta[320];
+        snprintf(meta, sizeof(meta),
+                 DL_BASE_PATH "/.meta/%d.json",
+                 ch->collection_id > 0 ? ch->collection_id : channel_id);
+        remove(meta);
+    }
+
+    /* 5. Remove episodes from model */
+    {
+        int write = 0;
+        for (int i = 0; i < m->local_episode_count; i++) {
+            if (m->local_episodes[i].channel_id != channel_id) {
+                if (write != i) m->local_episodes[write] = m->local_episodes[i];
+                write++;
+            }
+        }
+        m->local_episode_count = write;
+        if (write > 0) {
+            Episode *ne = realloc(m->local_episodes, write * sizeof(Episode));
+            if (ne) m->local_episodes = ne;
+        } else {
+            free(m->local_episodes);
+            m->local_episodes = NULL;
+        }
+    }
+
+    /* 6. Remove channel from model */
+    {
+        int write = 0;
+        for (int i = 0; i < m->local_channel_count; i++) {
+            if (m->local_channels[i].id != channel_id) {
+                if (write != i) m->local_channels[write] = m->local_channels[i];
+                write++;
+            }
+        }
+        m->local_channel_count = write;
+        if (write > 0) {
+            Channel *nc = realloc(m->local_channels, write * sizeof(Channel));
+            if (nc) m->local_channels = nc;
+        } else {
+            free(m->local_channels);
+            m->local_channels = NULL;
+        }
+    }
+
+    /* 7. Update has_content flag */
+    m->local_has_content = (m->local_channel_count > 0);
+
+    printf("[INF] delete_channel_local: %d files deleted, done\n", deleted_files);
+    fflush(stdout);
+}

@@ -107,15 +107,13 @@ void backend_deinit(void) { http_client_deinit(); }
 
 /* ── Chart API: get top podcasts via iTunes Search ──────────────────── */
 
-int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int limit)
+int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int limit, int genre_id)
 {
     *out_channels = NULL;
 
     int body_len = 0;
     char *body = NULL;
 
-    /* Up to 2 attempts: cache first, then HTTP if cache is corrupt or missing.
-     * On cJSON parse failure we purge the corrupt file and loop. */
     for (int attempt = 0; attempt < 2; attempt++) {
         if (!body) {
             if (attempt == 0 && cache_is_valid(CACHE_CHART)) {
@@ -127,13 +125,17 @@ int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int li
         }
 
         if (!body) {
-            /* HTTP fetch */
             if (limit <= 0) limit = 50;
             char url[1024];
             int status = 0;
-            snprintf_safe(url, sizeof(url),
-                     "%s/api/charts/full?country=%s&limit=%d",
-                     PODCAST_SERVER, country ? country : "cn", limit > 0 ? limit : 50);
+            if (genre_id > 0)
+                snprintf_safe(url, sizeof(url),
+                         "%s/api/charts/full?country=%s&limit=%d&genre=%d",
+                         PODCAST_SERVER, country ? country : "cn", limit, genre_id);
+            else
+                snprintf_safe(url, sizeof(url),
+                         "%s/api/charts/full?country=%s&limit=%d",
+                         PODCAST_SERVER, country ? country : "cn", limit);
             body = http_get_sync(url, &status, &body_len);
             if (status == 0) {
                 BK_LOGW("[BACKEND] chart: server unreachable\n");

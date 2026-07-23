@@ -41,6 +41,7 @@ extern "C" {
 #include "gt911.h"
 #include "hal.h"
 #include "wifi_cred.h"
+#include "log_system.h"
 
 /* SD card */
 #include "esp_vfs_fat.h"
@@ -492,6 +493,9 @@ extern "C" void app_main(void)
             s_fs_drv.tell_cb  = SdFs::tell_cb;
             lv_fs_drv_register(&s_fs_drv);
             ESP_LOGI(TAG, "LVGL FS driver (S:) → /sdcard/");
+
+            /* Initialize logging system — SD card is ready */
+            log_system_init();
         } else {
             ESP_LOGW(TAG, "SD card not available (%s), downloads disabled",
                      esp_err_to_name(ret));

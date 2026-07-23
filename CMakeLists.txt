@@ -16,6 +16,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/clock
     ${CMAKE_CURRENT_SOURCE_DIR}/system/battery_monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/system/events
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/logs
     ${CMAKE_CURRENT_SOURCE_DIR}/system/ota
     ${CMAKE_CURRENT_SOURCE_DIR}/system/audio_player
     ${CMAKE_CURRENT_SOURCE_DIR}/system/wifi

@@ -19,6 +19,7 @@
 #include "app_event.h"
 #include "lv_page.h"
 #include "../lv_channel_card.h"
+#include "lv_bottom_sheet.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_search;
@@ -52,6 +53,86 @@ static void on_card_clicked(lv_event_t* e) {
     int* id_ptr = malloc(sizeof(int));
     *id_ptr = channel_id;
     PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_LOCAL, PAGE_CHANNEL, id_ptr);
+}
+
+/* ── 左滑删除 ────────────────────────────────────────────────────────── */
+
+static lv_bottom_sheet_t *s_delete_sheet = NULL;
+static int                s_delete_channel_id = 0;
+
+static void on_delete_sheet_destroy(lv_event_t *e)
+{
+    (void)e;
+    s_delete_sheet = NULL;
+}
+
+static void on_delete_confirm(lv_event_t *e)
+{
+    (void)e;
+    if (s_delete_sheet) {
+        lv_bottom_sheet_close(s_delete_sheet);
+        s_delete_sheet = NULL;
+    }
+    podcast_controller_delete_channel_local(&g_podcast_app, s_delete_channel_id);
+
+    /* Refresh the Local page to reflect the deletion */
+    page_navigator_navigate_to(&g_podcast_app.view->page_nav,
+                               &g_podcast_app, PAGE_LOCAL, NULL);
+}
+
+static void show_delete_sheet(const Channel *ch)
+{
+    if (s_delete_sheet || !ch) return;
+    s_delete_channel_id = ch->id;
+
+    s_delete_sheet = lv_bottom_sheet_create(lv_screen_active());
+    lv_obj_add_event_cb(s_delete_sheet->overlay, on_delete_sheet_destroy,
+                        LV_EVENT_DELETE, NULL);
+
+    lv_obj_t *content = lv_bottom_sheet_get_content(s_delete_sheet);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(content, 16, 0);
+    lv_obj_set_style_pad_row(content, 12, 0);
+
+    /* Title */
+    lv_obj_t *title = lv_label_create(content);
+    lv_label_set_text_fmt(title, "Delete \"%s\"?", ch->title);
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
+
+    /* Subtitle */
+    lv_obj_t *sub = lv_label_create(content);
+    lv_label_set_text(sub, "This will remove all downloaded\naudio files for this channel.");
+    lv_obj_set_style_text_font(sub, g_cjk_font, 0);
+    lv_obj_set_style_text_color(sub, lv_color_hex(0x999999), 0);
+
+    /* Delete button */
+    lv_obj_t *btn = lv_button_create(content);
+    lv_obj_set_size(btn, LV_PCT(100), 40);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0xE53935), 0);
+    lv_obj_set_style_radius(btn, 8, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_add_event_cb(btn, on_delete_confirm, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *btn_lbl = lv_label_create(btn);
+    lv_label_set_text(btn_lbl, "Delete");
+    lv_obj_set_style_text_color(btn_lbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(btn_lbl, g_cjk_font, 0);
+    lv_obj_center(btn_lbl);
+}
+
+static void on_card_swipe(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir != LV_DIR_LEFT) return;
+
+    lv_obj_t *card = lv_event_get_current_target_obj(e);
+    int channel_id = (int)(uintptr_t)lv_obj_get_user_data(card);
+    const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, channel_id);
+    if (ch) show_delete_sheet(ch);
 }
 
 /* ---- "Network" 链接点击 ---- */
@@ -121,6 +202,7 @@ static void build_card_chunk_cb(lv_timer_t *timer) {
     for (int i = bc->next; i < end; i++) {
         lv_obj_t *card = lv_channel_card_create(bc->row, bc->albums[i]);
         lv_obj_add_event_cb(card, on_card_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+        lv_obj_add_event_cb(card, on_card_swipe, LV_EVENT_GESTURE, NULL);
     }
     bc->next = end;
     if (bc->next >= bc->count) {

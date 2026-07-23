@@ -68,13 +68,13 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
      * FABs, etc.) is built, TLS handshakes to Apple CDN timeout.
      * Hypothesis: LVGL's rendering state interferes with TCP/IP stack. */
     if (hal_wifi_is_connected()) {
-        ESP_LOGI(TAG, "WiFi connected, fetching chart now...");
+        ESP_LOGI(TAG, "WiFi connected, chart fetch on category select");
         podcast_controller_init(&g_podcast_app);
         g_podcast_app.controller->model = g_podcast_app.model;
         g_podcast_app.controller->view  = g_podcast_app.view;
-        podcast_controller_fetch_chart(&g_podcast_app);
-        /* After fetch, controller is no longer needed until view interaction.
-         * View polls model->net_state to render the result. */
+        /* Chart is fetched on-demand when the user selects a category
+         * from the dropdown — no auto-fetch at startup. */
+        podcast_model_set_net_state(&g_podcast_app, NET_STATE_IDLE, NULL);
     } else {
         ESP_LOGI(TAG, "WiFi not connected, deferring fetch to network page");
         podcast_model_set_net_state(&g_podcast_app, NET_STATE_IDLE, NULL);

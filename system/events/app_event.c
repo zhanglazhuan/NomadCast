@@ -9,7 +9,7 @@
  * audio player, podcast controller, local page, download-task page, …). Some
  * register lazily when a page first opens, so a too-small cap silently DROPS the
  * later ones and their live-refresh stops working. */
-#define MAX_LISTENERS 12
+#define MAX_LISTENERS 16
 
 static app_event_cb_t s_listeners[MAX_LISTENERS];
 static int s_listener_count = 0;

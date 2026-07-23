@@ -45,6 +45,10 @@ void sleep_monitor_set_power_pin(gpio_num_t pin);
 typedef void (*sleep_monitor_wake_cb_t)(void);
 void sleep_monitor_set_wake_callback(sleep_monitor_wake_cb_t cb);
 
+/** Pre-sleep callback — fired BEFORE display blank. Use to flush logs, save state. */
+typedef void (*sleep_monitor_pre_sleep_cb_t)(void);
+void sleep_monitor_set_pre_sleep_callback(sleep_monitor_pre_sleep_cb_t cb);
+
 /**
  * @brief Update the sleep timeout at runtime (e.g. from Settings UI).
  * @param timeout_min  0 = never sleep, otherwise 1..60 minutes.

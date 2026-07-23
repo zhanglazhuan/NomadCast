@@ -22,6 +22,7 @@ static bool                   s_is_sleeping = false;
 static uint64_t               s_last_activity_ms = 0;
 static gpio_num_t             s_power_pin   = GPIO_NUM_NC;
 static sleep_monitor_wake_cb_t s_wake_cb    = NULL;
+static sleep_monitor_pre_sleep_cb_t s_pre_sleep_cb = NULL;
 
 /* ── Forward declarations ─────────────────────────────────────────────────── */
 
@@ -62,6 +63,10 @@ static void on_button_event(input_event_t event, void *user_data)
 static void enter_sleep(void)
 {
     if (s_is_sleeping) return;
+
+    /* Notify subsystems before blanking display */
+    if (s_pre_sleep_cb) s_pre_sleep_cb();
+
     ESP_LOGI(TAG, "Manual sleep via power key");
 
     /* 1. Blank the display */
@@ -185,4 +190,9 @@ void sleep_monitor_set_power_pin(gpio_num_t pin)
 void sleep_monitor_set_wake_callback(sleep_monitor_wake_cb_t cb)
 {
     s_wake_cb = cb;
+}
+
+void sleep_monitor_set_pre_sleep_callback(sleep_monitor_pre_sleep_cb_t cb)
+{
+    s_pre_sleep_cb = cb;
 }
