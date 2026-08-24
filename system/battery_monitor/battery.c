@@ -1,8 +1,8 @@
 /*
  * NomadCast — sys/battery: periodic battery monitor.
  *
- * Every 5 min: read voltage (ADC1_CH2 / GPIO3, x2 divider), quantize to percent
- * via a Li-ion OCV table, read charging (CHAG / GPIO38 low). When the status-bar
+ * Every 5 min: read voltage (ADC1_CH7 / GPIO8, x2 divider), quantize to percent
+ * via a Li-ion OCV table, read charging (CHAG / GPIO4 low). When the status-bar
  * icon bucket or charging state changes, fire APP_EVENT_BATTERY_CHANGED.
  * ADC logic ported from debug/t_battery.
  */
@@ -15,13 +15,14 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 #include "esp_err.h"
+#include "nomadcast_v1.h"
 
 static const char *TAG = "battery";
 
-#define PIN_CHAG        GPIO_NUM_38
-#define BAT_ADC_UNIT    ADC_UNIT_1
-#define BAT_ADC_CHANNEL ADC_CHANNEL_2      /* GPIO3 on ESP32-S3 */
-#define BAT_DIVIDER     2
+#define PIN_CHAG        NOMADCAST_BAT_CHG_PIN
+#define BAT_ADC_UNIT    NOMADCAST_BAT_ADC_UNIT
+#define BAT_ADC_CHANNEL NOMADCAST_BAT_ADC_CHANNEL   /* GPIO8 on ESP32-S3 */
+#define BAT_DIVIDER     NOMADCAST_BAT_DIVIDER
 #define BAT_SAMPLES     16
 #define BAT_PERIOD_MS   300000             /* 5 minutes */
 
@@ -139,7 +140,8 @@ void battery_init(void)
     s_timer = lv_timer_create(battery_timer_cb, BAT_PERIOD_MS, NULL);
     lv_timer_set_repeat_count(s_timer, -1);
 
-    ESP_LOGI(TAG, "Initialized (5-min sampler, CHAG=GPIO38, BT_M=ADC1_CH2)");
+    ESP_LOGI(TAG, "Initialized (5-min sampler, CHAG=GPIO%d, BT_M=ADC1_CH%d)",
+             (int)NOMADCAST_BAT_CHG_PIN, (int)NOMADCAST_BAT_ADC_CHANNEL);
 }
 
 int  battery_get_percent(void) { return s_last_percent; }

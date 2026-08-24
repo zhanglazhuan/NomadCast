@@ -8,9 +8,9 @@ NomadCast — ESP32-S3 smart podcast player firmware for the **Leisound V1** boa
 
 - **MCU**: ESP32-S3 (16MB flash, 8MB PSRAM)
 - **Display**: ST7789V 240×320 RGB565 (SPI2, esp_lcd)
-- **Touch**: GT911 (I2C0)
+- **Touch**: GT911 (software bit-bang I2C — SDA=38 / SCL=45)
 - **Audio**: ES8156 DAC + HT6872 amp (I2S)
-- **SD**: 1-bit SDMMC (GPIO 1/14/2)
+- **SD**: 1-bit SDMMC (GPIO 10/11/9)
 - **Framework**: ESP-IDF v5.5.3
 - **UI**: LVGL v9.5 (managed component)
 - **PC simulator**: `pc_demo/` (SDL2 + LVGL, shares `apps/` source)
@@ -79,11 +79,13 @@ NomadCast/
 │   └── button/ flash/ rtc/   # (empty — no CMakeLists)
 │
 ├── drivers/                  # Device drivers (active)
-│   ├── es8156/               # ES8156 DAC (I2C)
-│   └── gt911/                # GT911 touch controller (I2C)
+│   ├── es8156/               # ES8156 DAC (software I2C)
+│   ├── gt911/                # GT911 touch controller (software I2C)
+│   └── sw_i2c/               # Shared software bit-bang I2C (SDA=38 / SCL=45)
 │
 ├── board/
-│   └── leisound_v1.h         # Pin definitions (single source of truth)
+│   ├── nomadcast_v1.h        # Pin definitions (single source of truth, NOMADCAST_*)
+│   └── leisound_v1.h         # Deprecated shim → nomadcast_v1.h (LEISOUND_* aliases)
 │
 ├── pc_demo/                  # PC simulator (SDL2 + LVGL)
 │   ├── CMakeLists.txt        # References ../../apps/settings/*.c, ../../apps/podcast/*.c
@@ -107,9 +109,9 @@ NomadCast/
 ### Hardware Init (proven from t_ui)
 
 All display/touch init is inline in `main/NomadCast.cpp`:
-1. Power ON → HW reset (shared GPIO8 for LCD + GT911)
+1. Power ON (AP power GPIO46 + LCD power GPIO43 + backlight GPIO12) → HW reset (shared GPIO40 for LCD + GT911)
 2. SPI2 + ST7789 via `esp_lcd` framework (`reset_gpio_num = GPIO_NUM_NC`)
-3. GT911 via I2C0 (manual driver, no dependencies on `drivers/gt911`)
+3. GT911 via `drivers/gt911` (software bit-bang I2C via `drivers/sw_i2c`)
 4. LVGL display + indev + `esp_timer` tick (1ms)
 5. LVGL buffers: 2 × (240×20) from PSRAM, partial render mode
 6. RGB565 byte swap in flush callback (LVGL big-endian → ST7789 little-endian)

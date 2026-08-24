@@ -39,6 +39,7 @@ extern "C" {
 #include "audio_player.h"
 #include "ota.h"
 #include "gt911.h"
+#include "nomadcast_v1.h"
 #include "hal.h"
 #include "wifi_cred.h"
 #include "log_system.h"
@@ -63,18 +64,20 @@ static lv_font_t s_font_harmony_with_fb;  /* mutable copy — allows fallback ch
 /* g_cjk_font defined with C linkage (used by lv_page.c etc.) */
 extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 
-/* ---- Pin map (Leisound V1) ---- */
-#define PIN_EN_POWER    GPIO_NUM_46
-#define PIN_SPI_SCK     GPIO_NUM_12
-#define PIN_SPI_MOSI    GPIO_NUM_11
-#define PIN_SPI_MISO    GPIO_NUM_13
-#define PIN_LCD_CS      GPIO_NUM_10
-#define PIN_LCD_DC      GPIO_NUM_45
-#define PIN_LCD_RST     GPIO_NUM_8
-#define PIN_I2C_SDA     GPIO_NUM_47
-#define PIN_I2C_SCL     GPIO_NUM_48
-#define PIN_TP_INT      GPIO_NUM_18
-#define PIN_TP_RST      GPIO_NUM_8
+/* ---- Pin map (NomadCast V1 — from nomadcast_v1.h) ---- */
+#define PIN_EN_POWER    NOMADCAST_PIN_AP_POWER
+#define PIN_SPI_SCK     NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI    NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO    NOMADCAST_PIN_SPI_MISO
+#define PIN_LCD_CS      NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC      NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST     NOMADCAST_PIN_LCD_RST
+#define PIN_LCD_POWER   NOMADCAST_PIN_LCD_POWER
+#define PIN_BACKLIGHT   NOMADCAST_PIN_LCD_BL
+#define PIN_I2C_SDA     NOMADCAST_PIN_I2C_SDA
+#define PIN_I2C_SCL     NOMADCAST_PIN_I2C_SCL
+#define PIN_TP_INT      NOMADCAST_PIN_TP_INT
+#define PIN_TP_RST      NOMADCAST_PIN_TP_RST
 #define LCD_W           240
 #define LCD_H           320
 #define SPI_HOST_ID     SPI2_HOST
@@ -119,7 +122,7 @@ static esp_lcd_panel_handle_t display_init(void)
     return panel;
 }
 
-/* ---- HW reset (shared GPIO8 for LCD + GT911) ---- */
+/* ---- HW reset (shared GPIO40 for LCD + GT911) ---- */
 static void hw_reset(void)
 {
     gpio_config_t cfg = { .pin_bit_mask = BIT64(PIN_TP_RST) | BIT64(PIN_TP_INT), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
@@ -234,8 +237,11 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "=== NomadCast Starting ===");
 
     /* [1] Power + HW reset */
-    gpio_config_t pwr = { .pin_bit_mask = BIT64(PIN_EN_POWER), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
-    gpio_config(&pwr); gpio_set_level(PIN_EN_POWER, 1);
+    gpio_config_t pwr = { .pin_bit_mask = BIT64(PIN_EN_POWER) | BIT64(PIN_LCD_POWER) | BIT64(PIN_BACKLIGHT), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
+    gpio_config(&pwr);
+    gpio_set_level(PIN_EN_POWER, 1);    /* 全板外设电源 */
+    gpio_set_level(PIN_LCD_POWER, 1);   /* 屏幕电源 */
+    gpio_set_level(PIN_BACKLIGHT, 1);   /* 背光 */
     vTaskDelay(pdMS_TO_TICKS(100));
     hw_reset();
 
@@ -306,8 +312,8 @@ extern "C" void app_main(void)
         if (s_gt911_cfg.use_interrupt) {
             gt911_register_isr(s_gt911_dev, on_gt911_touch, NULL);
         }
-        /* ES8156 codec shares GT911's I2C0 bus — enable volume control. */
-        audio_player_codec_init(gt911_get_i2c_bus(s_gt911_dev));
+        /* ES8156 codec shares GT911's software-I2C bus — enable volume control. */
+        audio_player_codec_init();
     } else {
         ESP_LOGW(TAG, "Touch not available");
     }
@@ -463,9 +469,9 @@ extern "C" void app_main(void)
         sdmmc_host_t sd_host = SDMMC_HOST_DEFAULT();
         sd_host.flags = SDMMC_HOST_FLAG_1BIT;
         sdmmc_slot_config_t slot_cfg = SDMMC_SLOT_CONFIG_DEFAULT();
-        slot_cfg.clk   = GPIO_NUM_1;
-        slot_cfg.cmd   = GPIO_NUM_14;
-        slot_cfg.d0    = GPIO_NUM_2;
+        slot_cfg.clk   = NOMADCAST_PIN_SD_CLK;    /* GPIO10 */
+        slot_cfg.cmd   = NOMADCAST_PIN_SD_CMD;    /* GPIO11 */
+        slot_cfg.d0    = NOMADCAST_PIN_SD_DAT0;   /* GPIO9 */
         slot_cfg.width = 1;
         esp_vfs_fat_mount_config_t mount_cfg = {
             .format_if_mount_failed = false,

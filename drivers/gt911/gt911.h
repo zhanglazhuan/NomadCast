@@ -1,12 +1,14 @@
 /*
  * GT911 Capacitive Touch Controller Driver
  *
- * Ported from H7_GT911_I2C_Touch-master (STM32H7 working driver) to ESP-IDF.
+ * Software I2C (bit-banging) variant — uses drivers/sw_i2c, not the ESP-IDF
+ * hardware I2C master. See sw_i2c.h for why (GPIO45 strapping pin).
+ *
+ * Ported from H7_GT911_I2C_Touch-master (STM32H7) to ESP-IDF.
  *
  * Key facts:
- *   - I2C address = 0xBA (7-bit = 0x5D), fallback 0x14
+ *   - I2C address = 0x5D (7-bit), fallback 0x14
  *   - Reset sequence: RST+INT LOW 200ms → RST HI 200ms → INT HI 200ms
- *   - Config written on init: X/Y output max set to display resolution
  *   - Scan: read status → if buf_rdy → read touch count (1-5) → read points → clear status
  *   - ALWAYS write 0 to status reg after reading
  */
@@ -15,8 +17,8 @@
 #define GT911_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_err.h"
-#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 
 #ifdef __cplusplus
@@ -31,27 +33,15 @@ extern "C" {
 
 /* ---- Register addresses ---- */
 
-#define GT911_COMMAND_REG           0x8040   /**< Command register (write 2 = soft reset) */
-#define GT911_CONFIG_REG            0x8047   /**< Config table start */
 #define GT911_PRODUCT_ID_REG        0x8140
+#define GT911_CONFIG_REG            0x8047
 #define GT911_FIRMWARE_VERSION_REG  0x8144
-#define GT911_READ_XY_REG           0x814E   /**< Touch status + coordinate buffer */
-
-/* ---- Config table ---- */
-
-#define GT911_CONFIG_SIZE           184      /**< Config table size (0x8047 .. 0x80FE) */
-
-/* Offsets within config table (relative to GT911_CONFIG_REG) */
-#define GT911_CFG_OFF_VERSION       0
-#define GT911_CFG_OFF_X_MAX_L       1
-#define GT911_CFG_OFF_X_MAX_H       2
-#define GT911_CFG_OFF_Y_MAX_L       3
-#define GT911_CFG_OFF_Y_MAX_H       4
+#define GT911_READ_XY_REG           0x814E
 
 /* ---- I2C addresses ---- */
 
-#define GT911_I2C_ADDR              0xBA   /* 7-bit = 0x5D */
-#define GT911_I2C_ADDR_ALT          0x14   /* Fallback address */
+#define GT911_I2C_ADDR              0x5D   /* primary 7-bit address */
+#define GT911_I2C_ADDR_ALT          0x14   /* fallback 7-bit address */
 
 /* ---- Types ---- */
 
@@ -88,9 +78,9 @@ typedef void (*gt911_touch_cb_t)(const gt911_touch_point_t *points,
 typedef struct {
     gpio_num_t  rst_pin;        /**< Reset pin (output) */
     gpio_num_t  int_pin;        /**< Interrupt pin (output during reset, then input) */
-    gpio_num_t  i2c_sda_pin;    /**< I2C SDA pin */
-    gpio_num_t  i2c_scl_pin;    /**< I2C SCL pin */
-    uint32_t    i2c_freq_hz;    /**< I2C clock frequency (default 100000) */
+    gpio_num_t  i2c_sda_pin;    /**< Software I2C SDA pin */
+    gpio_num_t  i2c_scl_pin;    /**< Software I2C SCL pin */
+    uint32_t    i2c_freq_hz;    /**< IGNORED — software I2C runs at a fixed ~100 kHz */
     uint16_t    max_width;      /**< Expected display width for coord clamping */
     uint16_t    max_height;     /**< Expected display height for coord clamping */
     bool        use_interrupt;  /**< Enable interrupt-driven mode (INT pin falling edge) */
@@ -106,24 +96,18 @@ typedef struct gt911_dev_t gt911_dev_t;
 /**
  * @brief Initialize GT911 touch controller.
  *
- * Powers up the chip, performs the hardware reset sequence, initializes I2C,
- * probes the device, and verifies product ID.
+ * Initializes the software I2C bus, probes the device, and verifies the product
+ * ID. The caller must perform the hardware reset sequence on rst_pin/int_pin
+ * before calling this.
  *
- * @param[in]  config   Hardware pin and bus configuration.
+ * @param[in]  config   Hardware pin configuration.
  * @param[out] out_dev  Pointer to receive the device handle.
  * @return
  *   - ESP_OK on success
- *   - ESP_ERR_NOT_FOUND if GT911 not detected on I2C bus
+ *   - ESP_ERR_NOT_FOUND if GT911 not detected on the I2C bus
  *   - ESP_ERR_INVALID_ARG if config or out_dev is NULL
- *   - ESP_FAIL on I2C or GPIO error
  */
 esp_err_t gt911_init(const gt911_config_t *config, gt911_dev_t **out_dev);
-
-/**
- * @brief Get the I2C master bus handle GT911 created (to share with other
- *        devices on the same bus, e.g. the ES8156 codec). NULL if dev is NULL.
- */
-i2c_master_bus_handle_t gt911_get_i2c_bus(gt911_dev_t *dev);
 
 /**
  * @brief Perform a single touch scan (polling mode).
@@ -190,25 +174,6 @@ esp_err_t gt911_suspend(gt911_dev_t *dev);
  * @return ESP_OK on success.
  */
 esp_err_t gt911_resume(gt911_dev_t *dev);
-
-/**
- * @brief Write the output resolution to the GT911 config table.
- *
- * Reads the current config from the GT911, updates the X/Y output maximum
- * fields, recalculates the checksum, writes the config back, and triggers a
- * soft reset so the GT911 loads the new settings.
- *
- * The GT911 uses these values to scale its ADC output — without this call
- * the chip may report coordinates mapped to a different resolution than the
- * actual display.
- *
- * @param dev     Device handle.
- * @param width   Display width in pixels  (stored as X output max).
- * @param height  Display height in pixels (stored as Y output max).
- * @return ESP_OK on success.
- */
-esp_err_t gt911_write_resolution_config(gt911_dev_t *dev,
-                                        uint16_t width, uint16_t height);
 
 /**
  * @brief Quick check: is a touch currently active?

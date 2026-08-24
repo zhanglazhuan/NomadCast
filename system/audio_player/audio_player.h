@@ -12,7 +12,6 @@
 #define AUDIO_PLAYER_H
 
 #include <stdbool.h>
-#include "driver/i2c_master.h"   /* i2c_master_bus_handle_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,9 +20,9 @@ extern "C" {
 /** Initialize audio hardware (I2C, ES8156, I2S). Call once at boot. */
 bool audio_player_init(void);
 
-/** Attach the ES8156 codec on the given (shared) I2C bus and apply the saved
- *  volume. Call once at boot after the I2C bus exists. */
-void audio_player_codec_init(i2c_master_bus_handle_t bus);
+/** Attach the ES8156 codec (software I2C — pins from nomadcast_v1.h) and apply
+ *  the saved volume. Call once at boot. */
+void audio_player_codec_init(void);
 
 /** Current volume 0-100. */
 int audio_player_get_volume(void);

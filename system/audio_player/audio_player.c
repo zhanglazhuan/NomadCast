@@ -34,14 +34,15 @@
 #include "es8156.h"
 #include "app_event.h"
 #include "flash_store.h"
+#include "nomadcast_v1.h"
 
 static const char *TAG = "audio_player";
 
-/* ── I2S pins ─────────────────────────────────────────────────────────── */
-#define I2S_BCLK  GPIO_NUM_5
-#define I2S_LRCLK GPIO_NUM_6
-#define I2S_DOUT  GPIO_NUM_7
-#define PIN_AP_EN GPIO_NUM_21  /* Amp enable */
+/* ── I2S pins (from nomadcast_v1.h) ───────────────────────────────────── */
+#define I2S_BCLK  NOMADCAST_PIN_I2S_BCLK
+#define I2S_LRCLK NOMADCAST_PIN_I2S_WS
+#define I2S_DOUT  NOMADCAST_PIN_I2S_DOUT
+#define PIN_AP_EN NOMADCAST_PIN_AMP_EN  /* HT6872 amp enable */
 
 /* i2s_stream calls get_i2s_pins() (CONFIG_AUDIO_BOARD_CUSTOM). */
 #include "board_pins_config.h"
@@ -374,13 +375,15 @@ static void on_key_volume_event(app_event_t event, const void *data) {
     else if (event == APP_EVENT_KEY_VOL_DOWN) audio_player_set_volume(s_volume - 10);
 }
 
-void audio_player_codec_init(i2c_master_bus_handle_t bus) {
-    if (bus) {
-        es8156_config_t cfg = { .i2c_bus = bus, .i2c_address = 0x08 };
-        if (es8156_initialize(&cfg, &s_es8156) != ESP_OK) {
-            ESP_LOGW(TAG, "ES8156 init failed — volume control disabled");
-            s_es8156 = NULL;
-        }
+void audio_player_codec_init(void) {
+    es8156_config_t cfg = {
+        .scl_pin = NOMADCAST_PIN_I2C_SCL,
+        .sda_pin = NOMADCAST_PIN_I2C_SDA,
+        .i2c_address = NOMADCAST_ES8156_ADDR,
+    };
+    if (es8156_initialize(&cfg, &s_es8156) != ESP_OK) {
+        ESP_LOGW(TAG, "ES8156 init failed — volume control disabled");
+        s_es8156 = NULL;
     }
     s_volume = flash_get_i32("settings", "volume", 70);
     audio_player_set_volume(s_volume);

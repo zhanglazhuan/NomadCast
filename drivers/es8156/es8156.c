@@ -1,9 +1,9 @@
 /*
  * ES8156 Audio DAC Driver — ported from Everest 8051 reference (ES8156.C)
  *
- * Replaces:
- *   I2CWRNBYTE_CODEC(reg, val) → ESP-IDF i2c_master_transmit()
- *   DELAY_MS(ms)               → vTaskDelay(pdMS_TO_TICKS(ms))
+ * Software I2C (bit-banging) variant — register access goes through
+ * drivers/sw_i2c (I2CWRNBYTE_CODEC / I2CRDBYTE_CODEC equivalents).
+ * DELAY_MS(ms) → vTaskDelay(pdMS_TO_TICKS(ms))
  *
  * Reference values (from ES8156.C macros):
  *   Ratio=256, Format=NORMAL_I2S, Format_Len=16bit, SCLK_DIV=4
@@ -18,18 +18,15 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sw_i2c.h"
 
 static const char *TAG = "ES8156";
-
-#define ES8156_TIMEOUT_MS  100
 
 /* ========================================================================
  * Internal handle
  * ======================================================================== */
 
 typedef struct es8156 {
-    i2c_master_dev_handle_t dev_handle;
-    i2c_master_bus_handle_t i2c_bus;
     uint8_t i2c_address;
 } es8156_t;
 
@@ -39,13 +36,12 @@ typedef struct es8156 {
 
 esp_err_t es8156_write_reg(es8156_handle_t h, uint8_t reg, uint8_t value)
 {
-    uint8_t buf[2] = { reg, value };
-    return i2c_master_transmit(h->dev_handle, buf, sizeof(buf), ES8156_TIMEOUT_MS);
+    return sw_i2c_mem_write(h->i2c_address, reg, 1, &value, 1);
 }
 
 esp_err_t es8156_read_reg(es8156_handle_t h, uint8_t reg, uint8_t *value)
 {
-    return i2c_master_transmit_receive(h->dev_handle, &reg, 1, value, 1, ES8156_TIMEOUT_MS);
+    return sw_i2c_mem_read(h->i2c_address, reg, 1, value, 1);
 }
 
 /* ========================================================================
@@ -55,32 +51,20 @@ esp_err_t es8156_read_reg(es8156_handle_t h, uint8_t reg, uint8_t *value)
 esp_err_t es8156_initialize(const es8156_config_t *cfg, es8156_handle_t *out_handle)
 {
     ESP_RETURN_ON_FALSE(cfg && out_handle, ESP_ERR_INVALID_ARG, TAG, "null arg");
-    ESP_RETURN_ON_FALSE(cfg->i2c_bus, ESP_ERR_INVALID_ARG, TAG, "null i2c_bus");
 
-    // Probe device on I2C bus
+    // Init the shared software I2C bus and probe the device
     ESP_RETURN_ON_ERROR(
-        i2c_master_probe(cfg->i2c_bus, cfg->i2c_address, ES8156_TIMEOUT_MS),
-        TAG, "ES8156 not found at addr 0x%02X", cfg->i2c_address);
+        sw_i2c_master_init(cfg->scl_pin, cfg->sda_pin),
+        TAG, "sw i2c init failed");
+    ESP_RETURN_ON_FALSE(
+        sw_i2c_probe(cfg->i2c_address),
+        ESP_ERR_NOT_FOUND, TAG, "ES8156 not found at addr 0x%02X", cfg->i2c_address);
 
     // Allocate handle
     es8156_t *h = calloc(1, sizeof(es8156_t));
     ESP_RETURN_ON_FALSE(h, ESP_ERR_NO_MEM, TAG, "no mem");
 
-    h->i2c_bus = cfg->i2c_bus;
     h->i2c_address = cfg->i2c_address;
-
-    // Add device to I2C bus
-    i2c_device_config_t dev_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = cfg->i2c_address,
-        .scl_speed_hz    = 400000,
-    };
-    esp_err_t ret = i2c_master_bus_add_device(cfg->i2c_bus, &dev_cfg, &h->dev_handle);
-    if (ret != ESP_OK) {
-        free(h);
-        ESP_LOGE(TAG, "Failed to add I2C device");
-        return ret;
-    }
 
     *out_handle = h;
     ESP_LOGI(TAG, "Initialized at I2C addr 0x%02X", cfg->i2c_address);
@@ -90,7 +74,6 @@ esp_err_t es8156_initialize(const es8156_config_t *cfg, es8156_handle_t *out_han
 esp_err_t es8156_deinitialize(es8156_handle_t handle)
 {
     if (!handle) return ESP_ERR_INVALID_ARG;
-    i2c_master_bus_rm_device(handle->dev_handle);
     free(handle);
     return ESP_OK;
 }
