@@ -127,16 +127,21 @@ static bool task_from_json(const char *line, DownloadTask *t) {
 
 /* ── File I/O ────────────────────────────────────────────────────────────── */
 
-static void write_task_file(int id, const DownloadTask *t) {
+static bool write_task_file(int id, const DownloadTask *t) {
     char path[512];
     snprintf(path, sizeof(path), "%s/%08d.json", TASK_STORE_DIR, id);
-    FILE *f = fopen(path, "w");
-    if (!f) { ESP_LOGE(TAG, "write %s failed", path); return; }
+    char tmp[520]; snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) { ESP_LOGE(TAG, "write %s failed", tmp); return false; }
     task_to_json(f, t);
-    fflush(f);
-    fsync(fileno(f));   /* force SD card write-through */
-    fclose(f);
+    bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { unlink(tmp); return false; }
+    /* FatFS does not replace an existing destination on rename. */
+    remove(path);
+    if (rename(tmp, path) != 0) { unlink(tmp); return false; }
     ESP_LOGI(TAG, "Wrote task %d (st=%d)", id, (int)t->status);
+    return true;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
@@ -144,11 +149,12 @@ static void write_task_file(int id, const DownloadTask *t) {
 int task_store_load(struct PodcastApp *app) {
     if (!app || !app->model) return 0;
     PodcastModel *m = app->model;
+    podcast_model_download_lock(app);
 
     ensure_dir();
 
     DIR *d = opendir(TASK_STORE_DIR);
-    if (!d) return 0;
+    if (!d) { podcast_model_download_unlock(app); return 0; }
 
     /* Count eligible tasks first */
     time_t cutoff = time(NULL) - TASK_TTL_DAYS * 86400;
@@ -176,6 +182,7 @@ int task_store_load(struct PodcastApp *app) {
     free(m->download_tasks);
     m->download_tasks = count > 0
         ? (DownloadTask *)calloc(count, sizeof(DownloadTask)) : NULL;
+    if (count > 0 && !m->download_tasks) { closedir(d); m->download_task_count = 0; podcast_model_download_unlock(app); return -1; }
     m->download_task_count = 0;
 
     /* Load tasks, sorted by filename (= task id) */
@@ -201,6 +208,7 @@ int task_store_load(struct PodcastApp *app) {
     task_store_purge_old();
 
     ESP_LOGI(TAG, "Loaded %d tasks (cutoff %lld)", m->download_task_count, (long long)cutoff);
+    podcast_model_download_unlock(app);
     return m->download_task_count;
 }
 
@@ -212,15 +220,16 @@ int task_store_create(struct PodcastApp *app,
 {
     if (!app || !app->model) return -1;
     PodcastModel *m = app->model;
+    podcast_model_download_lock(app);
     ensure_dir();
 
     int id = read_next_id();
-    write_next_id(id + 1);
 
     /* Grow model array */
     int n = m->download_task_count + 1;
     DownloadTask *dt = (DownloadTask *)realloc(m->download_tasks,
                                                 n * sizeof(DownloadTask));
+    if (!dt) { podcast_model_download_unlock(app); return -1; }
     if (!dt) return -1;
     m->download_tasks = dt;
     DownloadTask *t = &dt[m->download_task_count];
@@ -239,29 +248,35 @@ int task_store_create(struct PodcastApp *app,
     snprintf(t->file_path, sizeof(t->file_path), "%s", path ? path : "");
     snprintf(t->audio_url, sizeof(t->audio_url), "%s", audio_url ? audio_url : "");
 
-    write_task_file(id, t);
+    if (!write_task_file(id, t)) { memset(t, 0, sizeof(*t)); podcast_model_download_unlock(app); return -1; }
+    write_next_id(id + 1);
     m->download_task_count = n;
 
     ESP_LOGI(TAG, "Created task %d: '%s'", id, ep_title);
+    podcast_model_download_unlock(app);
     return id;
 }
 
 void task_store_update(struct PodcastApp *app, int task_id) {
     if (!app || !app->model) return;
     PodcastModel *m = app->model;
+    podcast_model_download_lock(app);
 
     for (int i = 0; i < m->download_task_count; i++) {
         if (m->download_tasks[i].id == task_id) {
-            write_task_file(task_id, &m->download_tasks[i]);
+            (void)write_task_file(task_id, &m->download_tasks[i]);
+            podcast_model_download_unlock(app);
             return;
         }
     }
     ESP_LOGW(TAG, "update: task %d not found in memory", task_id);
+    podcast_model_download_unlock(app);
 }
 
 void task_store_delete(struct PodcastApp *app, int task_id) {
     if (!app || !app->model) return;
     PodcastModel *m = app->model;
+    podcast_model_download_lock(app);
 
     /* Unlink file */
     char path[512];
@@ -273,7 +288,7 @@ void task_store_delete(struct PodcastApp *app, int task_id) {
     for (int i = 0; i < m->download_task_count; i++) {
         if (m->download_tasks[i].id == task_id) { found = i; break; }
     }
-    if (found < 0) return;
+    if (found < 0) { podcast_model_download_unlock(app); return; }
 
     int tail = m->download_task_count - found - 1;
     if (tail > 0)
@@ -281,6 +296,7 @@ void task_store_delete(struct PodcastApp *app, int task_id) {
                 tail * sizeof(DownloadTask));
     m->download_task_count--;
     ESP_LOGI(TAG, "Deleted task %d", task_id);
+    podcast_model_download_unlock(app);
 }
 
 void task_store_purge_old(void) {

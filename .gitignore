@@ -20,6 +20,7 @@ server/archive/
 server/debug/
 server/docs/
 server/downloads/
+server/firmware/*.bin
 
 # ── Python artifacts ──
 __pycache__/

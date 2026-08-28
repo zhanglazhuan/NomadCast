@@ -2,7 +2,7 @@
  * @file local_cache.c
  * @brief Local download library index — one JSON file per channel (bucketed).
  *
- * Layout: /sdcard/.podcast/downloads/.meta/<collection_id>.json
+ * Layout: /sdcard/.nomadcast/downloads/.meta/<collection_id>.json
  *   { "cid":<canon>, "col":<collection_id>, "ch":"<title>",
  *     "episodes":[ {"eid","ep","url","dur"}, ... ] }
  *
@@ -34,9 +34,9 @@
 #define mkdir_p(p) mkdir(p, 0755)
 #endif
 
-#define DL_META_DIR   "/sdcard/.podcast/downloads/.meta"        /* per-channel buckets */
-#define DL_META_OLD   "/sdcard/.podcast/downloads/.meta.json"   /* legacy monolith (migration) */
-#define DL_LOG_PATH   "/sdcard/.podcast/downloads/dl.log"
+#define DL_META_DIR   "/sdcard/.nomadcast/downloads/.meta"        /* per-channel buckets */
+#define DL_META_OLD   "/sdcard/.nomadcast/downloads/.meta.json"   /* legacy monolith (migration) */
+#define DL_LOG_PATH   "/sdcard/.nomadcast/downloads/dl.log"
 
 /* ── JSON helpers ──────────────────────────────────────────────────────── */
 
@@ -73,7 +73,7 @@ static void json_write_str(FILE *f, const char *s) {
 }
 
 static void downloads_ensure_dir(void) {
-    char tmp[256] = "/sdcard/.podcast";
+    char tmp[256] = "/sdcard/.nomadcast";
     mkdir_p(tmp);
     strcat(tmp, "/downloads");
     mkdir_p(tmp);

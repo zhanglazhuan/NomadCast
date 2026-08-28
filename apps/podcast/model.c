@@ -20,6 +20,8 @@ void podcast_model_init(struct PodcastApp *app)
 {
     app->model = (PodcastModel *)calloc(1, sizeof(PodcastModel));
     if (app->model) {
+        app->model->download_mutex = xSemaphoreCreateMutex();
+        if (!app->model->download_mutex) { free(app->model); app->model = NULL; return; }
         app->model->net_state = NET_STATE_IDLE;
         app->model->font_size = flash_get_i32("podcast", "font", 2);          /* default Large */
         app->model->download_quality = flash_get_i32("podcast", "qual", 1);   /* default Medium */
@@ -58,12 +60,20 @@ void podcast_model_deinit(struct PodcastApp *app)
 {
     if (!app->model) return;
     PodcastModel *m = app->model;
+    if (m->download_mutex) vSemaphoreDelete(m->download_mutex);
     free(m->network_channels); free(m->network_episodes);
     free(m->local_channels); free(m->local_episodes);
     free(m->queue); free(m->download_tasks);
     free(m->search_results.channels); free(m->search_results.episodes);
     free(m->current_channel_episodes);
     free(m); app->model = NULL;
+}
+
+void podcast_model_download_lock(struct PodcastApp *app) {
+    if (app && app->model && app->model->download_mutex) xSemaphoreTake(app->model->download_mutex, portMAX_DELAY);
+}
+void podcast_model_download_unlock(struct PodcastApp *app) {
+    if (app && app->model && app->model->download_mutex) xSemaphoreGive(app->model->download_mutex);
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────────── */
@@ -278,6 +288,12 @@ void podcast_model_add_search_history(struct PodcastApp *app, const char *q)
     s_strcpy(m->search_history[0], q, sizeof(m->search_history[0]));
     if (m->search_history_count < 10) m->search_history_count++;
 }
+void podcast_model_clear_search_history(struct PodcastApp *app)
+{
+    PodcastModel *m = app->model; if (!m) return;
+    m->search_history_count = 0;
+    memset(m->search_history, 0, sizeof(m->search_history));
+}
 int podcast_model_get_search_history_count(struct PodcastApp *app) { return app->model ? app->model->search_history_count : 0; }
 const char *podcast_model_get_search_history_item(struct PodcastApp *app, int idx) {
     return (app->model && idx >= 0 && idx < app->model->search_history_count) ? app->model->search_history[idx] : NULL;
@@ -291,21 +307,25 @@ const DownloadTask *podcast_model_get_download_tasks(struct PodcastApp *app, int
 }
 int podcast_model_get_pending_download_count(struct PodcastApp *app) {
     if (!app->model) return 0;
+    podcast_model_download_lock(app);
     int c = 0;
     for (int i = 0; i < app->model->download_task_count; i++)
         if (app->model->download_tasks[i].status <= DOWNLOAD_STATUS_DOWNLOADING) c++;
-    return c;
+    podcast_model_download_unlock(app); return c;
 }
 static bool ia_has(const int *a, int n, int v) { for (int i=0;i<n;i++) if(a[i]==v) return true; return false; }
 void podcast_model_delete_download_tasks(struct PodcastApp *app, const int *ids, int n) {
     PodcastModel *m = app->model; if (!m || n <= 0) return;
+    podcast_model_download_lock(app);
     int w = 0;
     for (int i = 0; i < m->download_task_count; i++)
         if (!ia_has(ids, n, m->download_tasks[i].id)) { if (w != i) m->download_tasks[w] = m->download_tasks[i]; w++; }
     m->download_task_count = w;
+    podcast_model_download_unlock(app);
 }
 void podcast_model_cancel_download_tasks(struct PodcastApp *app, const int *ids, int n) {
     PodcastModel *m = app->model; if (!m || n <= 0) return;
+    podcast_model_download_lock(app);
     int w = 0;
     for (int i = 0; i < m->download_task_count; i++) {
         if (ia_has(ids, n, m->download_tasks[i].id)) {
@@ -316,6 +336,7 @@ void podcast_model_cancel_download_tasks(struct PodcastApp *app, const int *ids,
         w++;
     }
     m->download_task_count = w;
+    podcast_model_download_unlock(app);
 }
 
 /* ── Login ────────────────────────────────────────────────────────────── */

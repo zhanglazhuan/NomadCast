@@ -25,20 +25,27 @@ static const char *s_tz_strings[] = {
 
 /* ── State ────────────────────────────────────────────────────────────────── */
 
-static bool        s_synced = false;
-static bool        s_fmt24  = true;
-static int         s_tz_idx = 0;
-static lv_timer_t *s_timer  = NULL;
-static int         s_last_fired_minute = -1;
-static bool        s_sntp_started = false;
+typedef struct {
+    bool synced;
+    bool fmt24;
+    bool sntp_started;
+    int tz_idx;
+    int last_fired_minute;
+    lv_timer_t *timer;
+} clock_state_t;
+
+static clock_state_t s_clock = { 
+    .fmt24 = true, 
+    .last_fired_minute = -1 
+};
 
 /* ── WiFi event → trigger SNTP sync ───────────────────────────────────────── */
 
 static void on_app_event(app_event_t event, const void *data)
 {
     (void)data;
-    if (event == APP_EVENT_WIFI_CONNECTED && !s_sntp_started) {
-        s_sntp_started = true;
+    if (event == APP_EVENT_WIFI_CONNECTED && !s_clock.sntp_started) {
+        s_clock.sntp_started = true;
         clock_sync_sntp();
     }
 }
@@ -47,7 +54,7 @@ static void on_app_event(app_event_t event, const void *data)
 
 static void on_sntp_sync(struct timeval *tv)
 {
-    s_synced = true;
+    s_clock.synced = true;
     ESP_LOGI(TAG, "SNTP synced — epoch=%lld", (long long)tv->tv_sec);
 }
 
@@ -61,16 +68,16 @@ static void clock_tick_cb(lv_timer_t *t)
     struct tm tm;
     localtime_r(&now, &tm);
 
-    int hour = s_fmt24 ? tm.tm_hour
+    int hour = s_clock.fmt24 ? tm.tm_hour
                        : (tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12);
 
     /* Fire tick event on minute change (not every second) */
-    if (tm.tm_min != s_last_fired_minute) {
-        s_last_fired_minute = tm.tm_min;
+    if (tm.tm_min != s_clock.last_fired_minute) {
+        s_clock.last_fired_minute = tm.tm_min;
         app_event_clock_tick_t data = {
             .hour   = hour,
             .minute = tm.tm_min,
-            .synced = s_synced,
+            .synced = s_clock.synced,
         };
         app_event_fire(APP_EVENT_CLOCK_TICK, &data);
     }
@@ -80,8 +87,8 @@ static void clock_tick_cb(lv_timer_t *t)
 
 static void apply_timezone(void)
 {
-    if (s_tz_idx >= 0 && s_tz_idx < (int)TZ_COUNT) {
-        setenv("TZ", s_tz_strings[s_tz_idx], 1);
+    if (s_clock.tz_idx >= 0 && s_clock.tz_idx < (int)TZ_COUNT) {
+        setenv("TZ", s_tz_strings[s_clock.tz_idx], 1);
     }
     tzset();
 }
@@ -92,19 +99,19 @@ void clock_init(void)
 {
     /* Load saved timezone and format from flash so the correct settings
      * are active from boot, before the Settings app ever starts. */
-    s_tz_idx = flash_get_i32("settings", "tz", 0);
-    s_fmt24  = flash_get_bool("settings", "fmt24", true);
+    s_clock.tz_idx = flash_get_i32("settings", "tz", 0);
+    s_clock.fmt24  = flash_get_bool("settings", "fmt24", true);
     apply_timezone();
 
     /* At boot, try SNTP sync immediately (may fail if no WiFi yet).
      * On subsequent WiFi reconnects, APP_EVENT_WIFI_CONNECTED retriggers. */
     app_event_register(on_app_event);
 
-    s_timer = lv_timer_create(clock_tick_cb, 1000, NULL);
-    lv_timer_set_repeat_count(s_timer, -1);
+    s_clock.timer = lv_timer_create(clock_tick_cb, 1000, NULL);
+    lv_timer_set_repeat_count(s_clock.timer, -1);
 
     ESP_LOGI(TAG, "Initialized (tz=%s, fmt=%s)",
-             s_tz_strings[s_tz_idx], s_fmt24 ? "24h" : "12h");
+             s_tz_strings[s_clock.tz_idx], s_clock.fmt24 ? "24h" : "12h");
 }
 
 static void fire_immediate_tick(void)
@@ -112,16 +119,16 @@ static void fire_immediate_tick(void)
     time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
-    int hour = s_fmt24 ? tm.tm_hour
+    int hour = s_clock.fmt24 ? tm.tm_hour
                        : (tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12);
-    app_event_clock_tick_t data = { .hour = hour, .minute = tm.tm_min, .synced = s_synced };
+    app_event_clock_tick_t data = { .hour = hour, .minute = tm.tm_min, .synced = s_clock.synced };
     app_event_fire(APP_EVENT_CLOCK_TICK, &data);
 }
 
 void clock_set_timezone(int tz_idx)
 {
     if (tz_idx < 0 || tz_idx >= (int)TZ_COUNT) return;
-    s_tz_idx = tz_idx;
+    s_clock.tz_idx = tz_idx;
     apply_timezone();
     fire_immediate_tick();
     ESP_LOGI(TAG, "Timezone → %s", s_tz_strings[tz_idx]);
@@ -129,7 +136,7 @@ void clock_set_timezone(int tz_idx)
 
 void clock_set_format_24h(bool fmt24)
 {
-    s_fmt24 = fmt24;
+    s_clock.fmt24 = fmt24;
     fire_immediate_tick();
     ESP_LOGI(TAG, "Format → %s", fmt24 ? "24h" : "12h");
 }
@@ -139,7 +146,7 @@ int clock_get_hour(void)
     time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
-    return s_fmt24 ? tm.tm_hour
+    return s_clock.fmt24 ? tm.tm_hour
                    : (tm.tm_hour % 12 == 0 ? 12 : tm.tm_hour % 12);
 }
 
@@ -161,7 +168,7 @@ int clock_get_second(void)
 
 bool clock_is_synced(void)
 {
-    return s_synced;
+    return s_clock.synced;
 }
 
 void clock_sync_sntp(void)

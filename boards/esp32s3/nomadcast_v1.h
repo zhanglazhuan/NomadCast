@@ -8,9 +8,9 @@
  * t_battery, t_key, t_sd, t_speaker, t_earphone2), which were debugged against
  * the V1.1 schematic.
  *
- * NOTE: Touch (GT911) and codec (ES8156) share a software bit-banged I2C bus
- * (SDA=38 / SCL=45). SCL on GPIO45 is a VDD_SPI strapping pin whose pull-down
- * breaks the hardware I2C driver — see drivers/sw_i2c.
+ * NOTE: Touch (GT911) and codec (ES8156) share a hardware I2C bus (SDA=38 / SCL=45).
+ * SCL on GPIO45 is a VDD_SPI strapping pin; hardware I2C works once AP power
+ * (NOMADCAST_PIN_AP_POWER) is enabled.
  */
 
 #ifndef NOMADCAST_V1_H
@@ -30,6 +30,7 @@ extern "C" {
 
 #define NOMADCAST_PIN_AP_POWER    GPIO_NUM_46   /* 全板外设电源使能 (HIGH=ON) */
 #define NOMADCAST_PIN_LCD_POWER   GPIO_NUM_43   /* 屏幕电源 (HIGH=ON) — 独立于 AP power */
+#define NOMADCAST_PIN_USB_VBUS    GPIO_NUM_3    /* USB VBUS 检测 (HIGH=USB已插入; 关机态插入唤醒) */
 
 /* ========================================================================
  * SPI2 — ST7789V LCD (240x320, RGB565, 4-Wire SPI)
@@ -50,11 +51,11 @@ extern "C" {
 #define NOMADCAST_PIN_SPI_MISO    GPIO_NUM_13   /* SPI2 MISO (LCD 未用) */
 
 /* ========================================================================
- * I2C (software bit-bang) — GT911 touch + ES8156 codec 共享
+ * I2C (hardware) — GT911 touch + ES8156 codec 共享
  * ======================================================================== */
 
-#define NOMADCAST_PIN_I2C_SDA     GPIO_NUM_38   /* 软件 I2C SDA */
-#define NOMADCAST_PIN_I2C_SCL     GPIO_NUM_45   /* 软件 I2C SCL (strapping 引脚) */
+#define NOMADCAST_PIN_I2C_SDA     GPIO_NUM_38   /* I2C SDA */
+#define NOMADCAST_PIN_I2C_SCL     GPIO_NUM_45   /* I2C SCL (strapping 引脚) */
 #define NOMADCAST_PIN_TP_INT      GPIO_NUM_39   /* Touch 中断 (active high) */
 #define NOMADCAST_PIN_TP_RST      GPIO_NUM_40   /* Touch 复位 — 与 LCD_RST 共用 */
 
@@ -83,8 +84,8 @@ extern "C" {
 #define NOMADCAST_PIN_I2S_DOUT    GPIO_NUM_42   /* I2S 数据输出 (到 DAC/功放) */
 #define NOMADCAST_PIN_I2S_DIN     GPIO_NUM_NC   /* I2S 数据输入 (无 mic) */
 
-#define NOMADCAST_PIN_AMP_EN      GPIO_NUM_44   /* HT6872 功放使能 (HIGH=喇叭开) */
-#define NOMADCAST_PIN_HP_DETECT   GPIO_NUM_18   /* 耳机检测 (输入, HIGH=已插入) */
+#define NOMADCAST_PIN_AMP_EN      GPIO_NUM_44   /* AP_EN: HT6872 功放使能 (HIGH=喇叭开) */
+#define NOMADCAST_PIN_HP_DETECT   GPIO_NUM_18   /* AMP_EN: 耳机检测 (输入, HIGH=已插入) */
 
 /* ========================================================================
  * Battery (ADC + 充电状态)

@@ -8,6 +8,9 @@
     # 服务运行在 http://0.0.0.0:5000
 """
 import os
+import datetime
+import json
+import threading
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file, Response
 from podcast_service.search import search_podcasts, search_episodes
@@ -23,10 +26,17 @@ from blacklist import (is_blacklisted, add as blacklist_add,
 app = Flask(__name__)
 app.json.compact = True  # Flask 3.x compact JSON
 
+# Audio transcoding is intentionally disabled for the low-resource deployment.
+# Clients should download remote M4A files and play them locally.
+ENABLE_SERVER_TRANSCODE = False
+
 # 下载目录
 DOWNLOAD_DIR = Path(__file__).parent / "downloads"
 # OTA 固件目录 — 放 NomadCast.bin 和 version.txt
 FIRMWARE_DIR = Path(__file__).parent / "firmware"
+# 端侧设备上传的日志落盘目录
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_UPLOAD_LOCK = threading.Lock()
 
 
 @app.route("/")
@@ -54,9 +64,12 @@ def index():
             # 黑名单
             "/api/blacklist": "查看频道黑名单",
             # 播放 & 下载
-            "/api/play?url=<audio_url>": "流式播放音频（验证用）",
+            "/api/play?url=<audio_url>": "已禁用服务端转码（请先下载）",
             "/api/download?url=<audio_url>&title=<name>": "下载单集音频",
             "/api/download-batch?feed_url=<url>&limit=3": "批量下载 RSS 前 N 集",
+            # 端侧日志
+            "POST /api/logs/chunk": "设备上传原始 NDJSON 日志分块 — offset 游标",
+            "POST /api/logs/upload": "旧版设备日志上传兼容接口",
         },
     })
 
@@ -145,6 +158,10 @@ def api_download():
     audio_url = request.args.get("url", "").strip()
     if not audio_url:
         return jsonify({"error": "缺少 url 参数"}), 400
+    try:
+        start_sec = max(0.0, float(request.args.get("start", "0")))
+    except ValueError:
+        return jsonify({"error": "start 必须是数字"}), 400
 
     title = request.args.get("title", "").strip() or None
 
@@ -172,7 +189,12 @@ def api_raw():
 
     try:
         headers = {"User-Agent": "Leisound/1.0"}
-        upstream = req.get(audio_url, headers=headers, stream=True, timeout=30)
+        # Preserve byte-range requests so a paused/resumed client can continue
+        # from its current compressed-media offset instead of restarting.
+        if request.headers.get("Range"):
+            headers["Range"] = request.headers["Range"]
+        upstream = req.get(audio_url, headers=headers, stream=True, timeout=30,
+                           allow_redirects=True)
         upstream.raise_for_status()
 
         content_type = upstream.headers.get("Content-Type", "application/octet-stream")
@@ -185,13 +207,18 @@ def api_raw():
         # Forward the upstream size so the ESP32 knows the total up front —
         # enables an accurate download % and a byte-based ETA on the device.
         # (Without it Flask streams chunked and the device sees size = unknown.)
-        fwd_headers = {"Cache-Control": "no-cache"}
-        clen = upstream.headers.get("Content-Length")
-        if clen:
-            fwd_headers["Content-Length"] = clen
+        fwd_headers = {
+            "Cache-Control": "no-cache",
+            "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
+        }
+        for name in ("Content-Length", "Content-Range", "ETag", "Last-Modified"):
+            value = upstream.headers.get(name)
+            if value:
+                fwd_headers[name] = value
 
         return Response(
             generate(),
+            status=upstream.status_code,
             content_type=content_type,
             headers=fwd_headers,
         )
@@ -220,6 +247,9 @@ def api_play():
     Query params:
         url - audio direct link (required)
     """
+    if not ENABLE_SERVER_TRANSCODE:
+        return jsonify({"error": "服务端音频转码已禁用，请先下载到设备播放"}), 410
+
     import subprocess
 
     audio_url = request.args.get("url", "").strip()
@@ -228,14 +258,17 @@ def api_play():
 
     # ffmpeg reads the remote file directly (seekable via HTTP range) and
     # re-encodes to ADTS AAC (streamable: every frame carries its own header).
-    proc = subprocess.Popen(
-        ["ffmpeg", "-hide_banner", "-loglevel", "error",
+    ffmpeg_args = ["ffmpeg", "-hide_banner", "-loglevel", "error",
          "-user_agent", "Leisound/1.0",
          "-reconnect", "1", "-reconnect_streamed", "1",
-         "-reconnect_delay_max", "5",
-         "-i", audio_url,
+         "-reconnect_delay_max", "5"]
+    if start_sec > 0:
+        ffmpeg_args += ["-ss", f"{start_sec:.3f}"]
+    ffmpeg_args += ["-i", audio_url,
          "-c:a", "aac", "-b:a", "96k",
-         "-f", "adts", "pipe:1"],
+         "-f", "adts", "pipe:1"]
+    proc = subprocess.Popen(
+        ffmpeg_args,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def generate():
@@ -608,11 +641,19 @@ def api_ota_check():
         if not version or not fw:
             return jsonify({"error": "No firmware available"}), 404
 
+        changelog = ""
+        cl_file = FIRMWARE_DIR / "changelog.txt"
+        if cl_file.exists():
+            changelog = cl_file.read_text().strip()
+
+        date = datetime.datetime.fromtimestamp(fw.stat().st_mtime).strftime("%Y-%m-%d")
+
         return jsonify({
             "version": version,
             "url": f"http://{request.host}/api/ota/download",
             "size": size,
-            "changelog": "",
+            "changelog": changelog,
+            "date": date,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -634,6 +675,107 @@ def api_ota_download():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ─── 端侧日志上传 ──────────────────────────────────────────
+# 固件 (system/logs/log_uploader.c) POST /api/logs/chunk，body 为原始 NDJSON
+#   {"session": "s_YYYYMMDD_HHMMSS", "lines": ["...", "..."]}
+# 设备仅上传原始字节；服务端负责校验、去重和归档。
+
+@app.route("/api/logs/chunk", methods=["POST"])
+def api_logs_chunk():
+    """Append one idempotent NDJSON byte range from a device session."""
+    session = request.headers.get("X-Log-Session", "").strip()
+    try:
+        offset = int(request.headers.get("X-Log-Offset", "-1"))
+    except ValueError:
+        offset = -1
+    if not session or not all(c.isalnum() or c in "_-" for c in session):
+        return jsonify({"error": "非法 session 名"}), 400
+    if offset < 0:
+        return jsonify({"error": "非法 offset"}), 400
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    path = LOG_DIR / f"{session}.log"
+    bad_path = LOG_DIR / f"{session}.bad"
+    if bad_path.exists():
+        return jsonify({"error": "session 已丢弃", "reason": "discarded"}), 410
+    body = request.get_data(cache=False)
+    if not body:
+        return jsonify({"error": "chunk 不能为空"}), 400
+    # Some HTTP stacks strip the final line terminator. Accept a complete JSON
+    # record and canonicalize it here; the server owns NDJSON framing.
+    if not body.endswith(b"\n"):
+        body += b"\n"
+    # Validate each complete record on the server; the device never builds a
+    # JSON array or performs escaping.
+    try:
+        for line_no, line in enumerate(body.splitlines(), 1):
+            if not line.strip():
+                continue
+            json.loads(line.decode("utf-8"))
+    except UnicodeDecodeError as e:
+        app.logger.warning("[logs] invalid UTF-8 session=%s offset=%d line=%d: %s; prefix=%r",
+                           session, offset, line_no, e, body[:96])
+        path.unlink(missing_ok=True)
+        bad_path.touch()
+        return jsonify({"error": "非法 NDJSON", "reason": "invalid_utf8",
+                        "line": line_no}), 410
+    except json.JSONDecodeError as e:
+        app.logger.warning("[logs] invalid JSON session=%s offset=%d line=%d: %s; prefix=%r",
+                           session, offset, line_no, e, body[:96])
+        path.unlink(missing_ok=True)
+        bad_path.touch()
+        return jsonify({"error": "非法 NDJSON", "reason": "invalid_json",
+                        "line": line_no}), 410
+
+    with LOG_UPLOAD_LOCK:
+        current = path.stat().st_size if path.exists() else 0
+        if offset != current:
+            # Device may have retried after losing the response. Returning the
+            # authoritative cursor lets it resync without duplicating data.
+            return jsonify({"error": "offset mismatch", "next_offset": current}), 409
+        try:
+            with open(path, "ab") as f:
+                f.write(body)
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError as e:
+            return jsonify({"error": f"日志写入失败: {e}"}), 500
+        next_offset = current + len(body)
+    return jsonify({"ok": True, "next_offset": next_offset,
+                    "accepted_bytes": len(body)})
+
+@app.route("/api/logs/upload", methods=["POST"])
+def api_logs_upload():
+    """接收端侧设备上传的系统日志并落盘。"""
+    data = request.get_json(silent=True)
+    if data is None:
+        raw = request.get_data(as_text=True)[:500]
+        print(f"[logs] JSON parse failed, raw body: {raw!r}", flush=True)
+        data = {}
+    session = data.get("session", "").strip()
+    lines = data.get("lines")
+
+    if not session:
+        return jsonify({"error": "session 为必填"}), 400
+    if not isinstance(lines, list):
+        return jsonify({"error": "lines 必须为数组"}), 400
+
+    # 防路径穿越：session 只允许字母数字下划线连字符
+    if not all(c.isalnum() or c in "_-" for c in session):
+        return jsonify({"error": "非法 session 名"}), 400
+
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        path = LOG_DIR / f"{session}.log"
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            for line in lines:
+                if isinstance(line, str):
+                    f.write(line + "\n")
+    except OSError as e:
+        return jsonify({"error": f"日志写入失败: {e}"}), 500
+
+    return jsonify({"ok": True, "session": session, "lines": len(lines)})
 
 
 if __name__ == "__main__":

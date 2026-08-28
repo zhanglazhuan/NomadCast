@@ -2,7 +2,7 @@
  * @file cache.h
  * @brief Podcast data cache — disk-backed JSON with TTL expiry
  *
- * Stores raw API responses in .podcast/cache/ with meta.json for TTL tracking.
+ * Stores raw API responses in .nomadcast/cache/ with meta.json for TTL tracking.
  * All I/O is synchronous and expected to run before LVGL init.
  */
 #ifndef PODCAST_CACHE_H
@@ -48,7 +48,7 @@ char *cache_load_lookup_item(int collection_id, int *out_len);
 /** Save lookup result for a collection_id to KV cache */
 bool cache_save_lookup_item(int collection_id, const char *data, int len);
 
-/* ── Artwork cache (.podcast/cache/artwork/) ──────────────────────────────── */
+/* ── Artwork cache (.nomadcast/cache/artwork/) ──────────────────────────────── */
 
 /**
  * @brief Download artwork from URL and save as PNG to SD card.
@@ -63,7 +63,7 @@ bool cache_artwork_download(int collection_id, const char *url);
  */
 bool cache_artwork_exists(int collection_id);
 
-/* ── Playback position (.podcast/playback.json) ────────────────────────── */
+/* ── Playback position (.nomadcast/playback.json) ────────────────────────── */
 
 struct PodcastApp;
 
@@ -81,6 +81,7 @@ void cache_playback_save(void);
 PlaybackEntry *cache_playback_get(int episode_id);
 bool cache_playback_is_completed(int episode_id);
 int  cache_playback_get_position(int episode_id);
+int  cache_playback_total_sec(void);
 
 void cache_playback_set_position(int episode_id, int channel_id,
                                  int position_sec, int duration_sec);

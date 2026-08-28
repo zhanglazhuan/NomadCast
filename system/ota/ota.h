@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Default manifest URL when no "upd_url" flash key is configured. */
+#define OTA_DEFAULT_MANIFEST_URL "http://192.168.137.1:5000/api/ota/check"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -31,6 +34,7 @@ typedef void (*ota_check_cb_t)(ota_check_result_t result,
                                const char *new_version,
                                const char *changelog,
                                const char *firmware_url,
+                               const char *release_date,
                                void *user_data);
 
 typedef void (*ota_progress_cb_t)(int percent, void *user_data);
@@ -53,6 +57,12 @@ void ota_init(void);
  * @param user_data     Passed through to cb.
  */
 void ota_check(const char *manifest_url, ota_check_cb_t cb, void *user_data);
+
+/* ── Auto update ─────────────────────────────────────────────────────────── */
+
+/** Non-blocking auto-update: spawns a task that checks the manifest and, if a
+ *  newer version is available, downloads + flashes it and reboots. */
+void ota_auto_update_check(const char *manifest_url);
 
 /* ── Download & install ─────────────────────────────────────────────────── */
 

@@ -14,6 +14,7 @@
 #include "../view.h"
 #include "../app.h"
 #include "../model.h"
+#include "../cache.h"
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
 
@@ -23,11 +24,16 @@ extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_logout;
 extern const lv_image_dsc_t ic_login;
 
+/* ── 功能开关:登录/登出图标按钮 ──
+ * 0 = 隐藏按钮 (当前禁用登录), 1 = 显示 */
+#define PROFILE_LOGIN_BTN  0
+
 /* ---- 页面上下文 ---- */
 typedef struct {
     lv_bottom_sheet_t* sheet;  // 当前弹窗, 同时只存在一个
 } ProfilePageCtx;
 
+#if PROFILE_LOGIN_BTN
 static void on_sheet_delete(lv_event_t* e) {
     ProfilePageCtx* ctx = lv_event_get_user_data(e);
     if (ctx) ctx->sheet = NULL;
@@ -131,6 +137,7 @@ static void on_logout_clicked(lv_event_t* e) {
     lv_label_set_text(cl, "Cancel");
     lv_obj_center(cl);
 }
+#endif /* PROFILE_LOGIN_BTN */
 
 /* ---- 页面导航回调 ---- */
 static lv_timer_t *g_profile_dl_timer = NULL;
@@ -218,6 +225,7 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_style_text_color(uid, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(uid, g_cjk_font, 0);
 
+#if PROFILE_LOGIN_BTN
     /* 右侧图标按钮 — 按登录状态切换 login / logout */
     lv_obj_t* icon_btn = lv_button_create(card);
     lv_obj_set_size(icon_btn, 36, 36);
@@ -238,6 +246,7 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
         lv_obj_set_style_img_recolor(icon_img, lv_color_hex(0x999999), 0);
         lv_obj_add_event_cb(icon_btn, on_logout_clicked, LV_EVENT_CLICKED, ctx);
     }
+#endif /* PROFILE_LOGIN_BTN */
 
     /* ---- 统计数据 ---- */
     lv_obj_t* stats = lv_obj_create(main);
@@ -250,8 +259,15 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_flex_align(stats, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(stats, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* 真实统计数据: 播放时长(累加各集播放位置) + 已下载集数 */
+    int play_hours = cache_playback_total_sec() / 3600;
+    int downloads  = app->model ? app->model->local_episode_count : 0;
+    char play_val[16], dl_val[16];
+    snprintf(play_val, sizeof(play_val), "%d", play_hours);
+    snprintf(dl_val, sizeof(dl_val), "%d", downloads);
+
     struct { const char* val; const char* label; } stat_data[] = {
-        {"128", "Play Hours"}, {"36", "Downloads"},
+        {play_val, "Play Hours"}, {dl_val, "Downloads"},
     };
     for (int i = 0; i < 2; i++) {
         lv_obj_t* item = lv_obj_create(stats);

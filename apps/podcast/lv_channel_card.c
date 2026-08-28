@@ -39,7 +39,7 @@ lv_obj_t *lv_channel_card_create(lv_obj_t *parent, const Channel *a) {
 #if LV_CHANNEL_CARD_SHOW_ARTWORK
     char art_lvgl[256];
     snprintf(art_lvgl, sizeof(art_lvgl),
-             "S:.podcast/cache/artwork/%d.png", a->collection_id);
+             "S:.nomadcast/cache/artwork/%d.png", a->collection_id);
     lv_image_set_src(cover, art_lvgl);
 #endif
 

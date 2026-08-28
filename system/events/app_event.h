@@ -50,7 +50,10 @@ typedef void (*app_event_cb_t)(app_event_t event, const void *data);
 /* ── API ────────────────────────────────────────────────────────────────── */
 
 void app_event_register(app_event_cb_t cb);
+void app_event_unregister(app_event_cb_t cb);
 void app_event_fire(app_event_t event, const void *data);
+/* Dispatch queued events from the LVGL owner task. */
+void app_event_process(void);
 
 #ifdef __cplusplus
 }

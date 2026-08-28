@@ -12,6 +12,7 @@
 #define AUDIO_PLAYER_H
 
 #include <stdbool.h>
+#include "driver/i2c_master.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,9 +21,14 @@ extern "C" {
 /** Initialize audio hardware (I2C, ES8156, I2S). Call once at boot. */
 bool audio_player_init(void);
 
-/** Attach the ES8156 codec (software I2C — pins from nomadcast_v1.h) and apply
- *  the saved volume. Call once at boot. */
-void audio_player_codec_init(void);
+/** Attach the ES8156 codec on the shared hardware I2C bus (created by GT911)
+ *  and apply the saved volume. Call once at boot, after gt911_init(). */
+void audio_player_codec_init(i2c_master_bus_handle_t i2c_bus);
+
+/** Start headphone jack-detect monitoring (AMP_EN GPIO18 → AP_EN GPIO44).
+ *  Call once at boot (audio_player_codec_init does it). Inserting a headphone
+ *  mutes the speaker amp; unplugging restores it. */
+void audio_player_headphone_detect_init(void);
 
 /** Current volume 0-100. */
 int audio_player_get_volume(void);
@@ -50,6 +56,10 @@ bool audio_player_is_playing(void);
  *  Use this (not is_playing) to decide when the internal DRAM is actually free
  *  again — is_playing goes false on pause/at natural end before teardown. */
 bool audio_player_is_active(void);
+/** True when internal DRAM is too fragmented/low to safely start a download. */
+bool audio_player_memory_pressure(void);
+bool audio_player_is_local_source(void);
+void audio_player_log_memory(const char *where);
 
 /** Release pipeline memory without losing position (for download task).
  *  After this, pause(false) will rebuild and seek to the saved position.

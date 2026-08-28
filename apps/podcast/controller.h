@@ -13,18 +13,17 @@ struct PodcastView;
 
 /* ── RSS feed types (was rss_parser.h; now inline since ESP32 doesn't use the RSS XML parser) ─── */
 
-#define RSS_MAX_EPISODES    50
+#define RSS_MAX_EPISODES    10   /* per-page buffer (== EPISODES_PER_PAGE) */
 #define RSS_MAX_STR          512
 
+/* Only the fields the proxy server actually returns (see
+ * server/podcast_service/rss_parser.py). audio_type / audio_length / guid /
+ * description are NOT sent — dropped here to keep per-page RAM low. */
 typedef struct {
     char  title[RSS_MAX_STR];
     char  audio_url[RSS_MAX_STR];
-    char  audio_type[64];
-    long long audio_length;
     char  pub_date[128];
     char  duration[32];
-    char  description[RSS_MAX_STR];
-    char  guid[RSS_MAX_STR];
 } rss_episode_t;
 
 typedef struct {
@@ -110,7 +109,7 @@ bool podcast_controller_fetch_channel_episodes(struct PodcastApp *app, int album
 
 bool podcast_controller_login(struct PodcastApp *app,
                                const char *name, const char *password,
-                               const char *confirm_pwd, bool agreed,
+                               const char *confirm_pwd, bool registering, bool agreed,
                                const char **err_msg);
 
 /* ── Local Content ───────────────────────────────────────────────────────── */
@@ -134,7 +133,7 @@ void podcast_controller_delete_channel_local(struct PodcastApp *app, int channel
  *  TLS handshake and follows 302 redirects — the ESP32 only speaks plain HTTP
  *  to the proxy); local paths and already-proxied URLs are copied unchanged. */
 void podcast_media_url(char *out, int out_sz, const char *url);
-/** Same pattern but routes to /api/raw for file download (no transcoding) */
+/** Route file downloads through /api/raw (byte forwarding, no transcoding). */
 void podcast_download_url(char *out, int out_sz, const char *url);
 
 /** Re-enqueue PENDING tasks after boot / WiFi reconnect */
@@ -159,6 +158,11 @@ void podcast_controller_play_channel(struct PodcastApp *app, int album_id);
  *  it exists, otherwise the network/proxy stream URL. Writes "" if eid unknown. */
 void podcast_controller_media_for_episode(struct PodcastApp *app, int eid,
                                           char *out, int out_sz);
+
+/** True if the episode can be played directly (downloaded local file, or a
+ *  remote non-M4A stream). Remote M4A requires download first — server-side
+ *  transcoding is disabled. Used by the list UI to skip the player page. */
+bool podcast_controller_episode_playable(struct PodcastApp *app, int eid);
 
 /** Toggle play/pause of the current episode (true ADF pause/resume). No-op if
  *  no episode is loaded. Safe to call off the LVGL thread. */

@@ -1,12 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include "lvgl.h"
+#include "esp_log.h"
 #include "app_manager.h"
 
 #include "app.h"
 #include "view.h"
 #include "controller.h"
 #include "model.h"
+#include "flash_store.h"
 
 SettingsApp g_settings_app;
 
@@ -43,6 +45,14 @@ static bool settings_app_back(void)
     return page_navigator_navigate_pop(&g_settings_app.view->page_nav, &g_settings_app);
 }
 
+bool settings_app_factory_reset(void)
+{
+    ESP_LOGI("settings", "factory reset: erasing settings and wifi credentials");
+    flash_erase_ns("settings");
+    flash_erase_ns("wifi_cred");
+    return true;
+}
+
 /* ---- App descriptor ---- */
 
 static application_t settings_app_desc = {
@@ -51,6 +61,7 @@ static application_t settings_app_desc = {
     .start_func = settings_app_start,
     .stop_func  = settings_app_stop,
     .back_func  = settings_app_back,
+    .factory_reset_func = settings_app_factory_reset,
     .hidden     = false,
     .category   = APP_CATEGORY_SYSTEM,
 };

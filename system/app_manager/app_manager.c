@@ -26,23 +26,27 @@ static const char *TAG = "app_mgr";
 #define MAX_APPS        25
 #define INVALID_APP_ID  0xFF
 
-static SemaphoreHandle_t s_mutex;
+typedef struct {
+    SemaphoreHandle_t mutex;
+    application_t *apps[MAX_APPS];
+    uint8_t num_apps, num_visible_apps, current_app;
+    lv_obj_t *root_obj;
+    lv_group_t *group_obj;
+    on_app_manager_close_fn close_cb_func;
+    lv_timer_t *async_app_start_timer, *async_app_close_timer;
+    bool screen_is_on;
+} app_manager_state_t;
+
+static app_manager_state_t s_manager = {
+    .current_app = INVALID_APP_ID,
+    .screen_is_on = true,
+};
 
 static void async_app_start(lv_timer_t *timer);
 static void async_app_close(lv_timer_t *timer);
 static __attribute__((unused)) void transition_app_to_ui_hidden(application_t *app);
 static __attribute__((unused)) void transition_app_to_ui_visible(application_t *app);
 
-static application_t *apps[MAX_APPS];
-static uint8_t  num_apps;
-static uint8_t  num_visible_apps;
-static uint8_t  current_app;
-static lv_obj_t *root_obj;
-static lv_group_t *group_obj;
-static on_app_manager_close_fn close_cb_func;
-static lv_timer_t *async_app_start_timer;
-static lv_timer_t *async_app_close_timer;
-static bool screen_is_on = true;
 
 /* ========================================================================
  * Async start/close (LVGL timers, platform-agnostic)
@@ -50,49 +54,49 @@ static bool screen_is_on = true;
 
 static void async_app_start(lv_timer_t *timer)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    async_app_start_timer = NULL;
-    ESP_LOGI(TAG, "Start app id=%d", current_app);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    s_manager.async_app_start_timer = NULL;
+    ESP_LOGI(TAG, "Start app id=%d", s_manager.current_app);
 
-    application_t *app = apps[current_app];
-    assert(screen_is_on);
+    application_t *app = s_manager.apps[s_manager.current_app];
+    assert(s_manager.screen_is_on);
     app->current_state = APP_STATE_UI_VISIBLE;
 
     /* Release lock before calling app code to avoid deadlock */
-    xSemaphoreGive(s_mutex);
-    app->start_func(root_obj, group_obj);
+    xSemaphoreGive(s_manager.mutex);
+    app->start_func(s_manager.root_obj, s_manager.group_obj);
 }
 
 static void async_app_close(lv_timer_t *timer)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    uint8_t app_id = current_app;
-    bool has_app = app_id < num_apps;
-    xSemaphoreGive(s_mutex);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    uint8_t app_id = s_manager.current_app;
+    bool has_app = app_id < s_manager.num_apps;
+    xSemaphoreGive(s_manager.mutex);
 
     if (has_app) {
         ESP_LOGD(TAG, "Stop app id=%d", app_id);
         bool back_consumed = false;
-        if (apps[app_id]->back_func) {
-            back_consumed = apps[app_id]->back_func();
+        if (s_manager.apps[app_id]->back_func) {
+            back_consumed = s_manager.apps[app_id]->back_func();
         }
 
         if (!back_consumed) {
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            apps[app_id]->current_state = APP_STATE_STOPPED;
-            current_app = INVALID_APP_ID;
-            xSemaphoreGive(s_mutex);
+            xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+            s_manager.apps[app_id]->current_state = APP_STATE_STOPPED;
+            s_manager.current_app = INVALID_APP_ID;
+            xSemaphoreGive(s_manager.mutex);
 
-            apps[app_id]->stop_func();
+            s_manager.apps[app_id]->stop_func();
             app_manager_delete();
-            if (close_cb_func) close_cb_func();
+            if (s_manager.close_cb_func) s_manager.close_cb_func();
         }
     } else {
         ESP_LOGD(TAG, "Exit application manager");
         app_manager_delete();
-        if (close_cb_func) close_cb_func();
+        if (s_manager.close_cb_func) s_manager.close_cb_func();
     }
-    async_app_close_timer = NULL;
+    s_manager.async_app_close_timer = NULL;
 }
 
 /* ========================================================================
@@ -130,26 +134,26 @@ static __attribute__((unused)) void transition_app_to_ui_visible(application_t *
 int app_manager_show(on_app_manager_close_fn close_cb, lv_obj_t *root,
                      lv_group_t *group, const char *app_name)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
     bool app_found = false;
-    close_cb_func = close_cb;
-    root_obj = root;
-    group_obj = group;
+    s_manager.close_cb_func = close_cb;
+    s_manager.root_obj = root;
+    s_manager.group_obj = group;
 
     if (app_name != NULL) {
-        for (int i = 0; i < num_apps; i++) {
-            if (strcmp(apps[i]->name, app_name) == 0) {
-                current_app = i;
+        for (int i = 0; i < s_manager.num_apps; i++) {
+            if (strcmp(s_manager.apps[i]->name, app_name) == 0) {
+                s_manager.current_app = i;
                 app_found = true;
-                if (async_app_start_timer == NULL) {
-                    async_app_start_timer = lv_timer_create(async_app_start, 1, NULL);
-                    lv_timer_set_repeat_count(async_app_start_timer, 1);
+                if (s_manager.async_app_start_timer == NULL) {
+                    s_manager.async_app_start_timer = lv_timer_create(async_app_start, 1, NULL);
+                    lv_timer_set_repeat_count(s_manager.async_app_start_timer, 1);
                 }
                 break;
             }
         }
     }
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
 
     ESP_LOGI(TAG, "show: %s → %s", app_name ? app_name : "(null)", app_found ? "found" : "not found");
     return app_found ? 0 : -1;
@@ -157,42 +161,58 @@ int app_manager_show(on_app_manager_close_fn close_cb, lv_obj_t *root,
 
 void app_manager_delete(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    if (current_app < num_apps) {
-        uint8_t id = current_app;
-        apps[id]->current_state = APP_STATE_STOPPED;
-        current_app = INVALID_APP_ID;
-        xSemaphoreGive(s_mutex);
-        apps[id]->stop_func();
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    if (s_manager.current_app < s_manager.num_apps) {
+        uint8_t id = s_manager.current_app;
+        s_manager.apps[id]->current_state = APP_STATE_STOPPED;
+        s_manager.current_app = INVALID_APP_ID;
+        xSemaphoreGive(s_manager.mutex);
+        s_manager.apps[id]->stop_func();
         return;
     }
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
 }
 
 void app_manager_add_application(application_t *app)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    assert(num_apps < MAX_APPS);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    assert(s_manager.num_apps < MAX_APPS);
 
     app->current_state = APP_STATE_STOPPED;
-    apps[num_apps] = app;
-    num_apps++;
+    s_manager.apps[s_manager.num_apps] = app;
+    s_manager.num_apps++;
 
     if (!app->hidden) {
-        app->private_list_index = num_visible_apps;
-        num_visible_apps++;
+        app->private_list_index = s_manager.num_visible_apps;
+        s_manager.num_visible_apps++;
     }
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
+}
+
+bool app_manager_factory_reset_all(void)
+{
+    bool ok = true;
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    uint8_t count = s_manager.num_apps;
+    application_t *snapshot[MAX_APPS];
+    memcpy(snapshot, s_manager.apps, sizeof(snapshot));
+    xSemaphoreGive(s_manager.mutex);
+
+    for (uint8_t i = 0; i < count; ++i) {
+        if (!snapshot[i] || !snapshot[i]->factory_reset_func) continue;
+        if (!snapshot[i]->factory_reset_func()) ok = false;
+    }
+    return ok;
 }
 
 void app_manager_exit_app(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    if (async_app_close_timer == NULL) {
-        async_app_close_timer = lv_timer_create(async_app_close, 1, NULL);
-        lv_timer_set_repeat_count(async_app_close_timer, 1);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    if (s_manager.async_app_close_timer == NULL) {
+        s_manager.async_app_close_timer = lv_timer_create(async_app_close, 1, NULL);
+        lv_timer_set_repeat_count(s_manager.async_app_close_timer, 1);
     }
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
 }
 
 void app_manager_app_close_request(application_t *app)
@@ -203,56 +223,56 @@ void app_manager_app_close_request(application_t *app)
 
 int app_manager_get_num_apps(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    int n = num_apps;
-    xSemaphoreGive(s_mutex);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    int n = s_manager.num_apps;
+    xSemaphoreGive(s_manager.mutex);
     return n;
 }
 
 application_t *app_manager_get_app(int index)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    application_t *app = (index >= 0 && index < num_apps) ? apps[index] : NULL;
-    xSemaphoreGive(s_mutex);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    application_t *app = (index >= 0 && index < s_manager.num_apps) ? s_manager.apps[index] : NULL;
+    xSemaphoreGive(s_manager.mutex);
     return app;
 }
 
 app_state_t app_manager_get_app_state(application_t *app)
 {
     assert(app != NULL);
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
     app_state_t s = app->current_state;
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
     return s;
 }
 
 bool app_manager_is_app_running(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    bool running = current_app < num_apps;
-    xSemaphoreGive(s_mutex);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
+    bool running = s_manager.current_app < s_manager.num_apps;
+    xSemaphoreGive(s_manager.mutex);
     return running;
 }
 
 const char *app_manager_get_current_app_name(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    xSemaphoreTake(s_manager.mutex, portMAX_DELAY);
     const char *name = NULL;
-    if (current_app < num_apps && apps[current_app] != NULL) {
-        name = apps[current_app]->name;
+    if (s_manager.current_app < s_manager.num_apps && s_manager.apps[s_manager.current_app] != NULL) {
+        name = s_manager.apps[s_manager.current_app]->name;
     }
-    xSemaphoreGive(s_mutex);
+    xSemaphoreGive(s_manager.mutex);
     return name;
 }
 
 void app_manager_init(void)
 {
-    s_mutex = xSemaphoreCreateMutex();
-    memset(apps, 0, sizeof(apps));
-    num_apps = 0;
-    current_app = INVALID_APP_ID;
-    async_app_start_timer = NULL;
-    screen_is_on = true;
+    s_manager.mutex = xSemaphoreCreateMutex();
+    memset(s_manager.apps, 0, sizeof(s_manager.apps));
+    s_manager.num_apps = 0;
+    s_manager.current_app = INVALID_APP_ID;
+    s_manager.async_app_start_timer = NULL;
+    s_manager.screen_is_on = true;
 
-    ESP_LOGI(TAG, "Initialized (max %d apps)", MAX_APPS);
+    ESP_LOGI(TAG, "Initialized (max %d s_manager.apps)", MAX_APPS);
 }

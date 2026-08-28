@@ -20,6 +20,10 @@
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_info;
 
+/* Stable episode id = channel_id * this + global episode index.
+ * Must exceed the max episodes per channel (100+ pages → 1000+ episodes). */
+#define EPISODE_ID_PER_CHANNEL 100000
+
 typedef struct {
     lv_obj_t  *sel_label;
     lv_obj_t **track_cbs;
@@ -29,7 +33,6 @@ typedef struct {
     lv_obj_t  *list_container;
     lv_obj_t  *loading_label;
     lv_timer_t *poll_timer;
-    bool       tracks_built;
     int        channel_id;
     int        cur_page;         /* 0-indexed current page */
     int        total_pages;
@@ -81,12 +84,21 @@ static void on_checkbox_changed(lv_event_t *e) {
 static void on_track_clicked(lv_event_t *e) {
     lv_obj_t *row = lv_event_get_current_target_obj(e);
     int track_id = (int)(uintptr_t)lv_obj_get_user_data(row);
+
+    /* Remote M4A can't stream (server transcode is disabled) — it must be
+     * downloaded first. Stay on this page and toast instead of jumping to
+     * the player page. */
+    if (!podcast_controller_episode_playable(&g_podcast_app, track_id)) {
+        lv_toast_show("M4A 需下载后播放", 2000);
+        return;
+    }
+
     int *id_ptr = malloc(sizeof(int));
     *id_ptr = track_id;
     PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, id_ptr);
 }
 
-static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int index, ChannelPageCtx *ctx) {
+static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int index, int episode_num, ChannelPageCtx *ctx) {
     lv_obj_t *row = lv_obj_create(parent);
     if (!row) return NULL;  /* heap exhausted */
     lv_obj_set_size(row, LV_PCT(100), 48);
@@ -107,7 +119,7 @@ static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int in
     ctx->track_cbs[index] = cb;
 
     char buf[16];
-    snprintf(buf, sizeof(buf), "%02d", (int)(index + 1));
+    snprintf(buf, sizeof(buf), "%02d", episode_num);
     lv_obj_t *n = lv_label_create(row);
     if (!n) return row;  /* heap exhausted — bail gracefully */
     lv_label_set_text(n, buf);
@@ -139,166 +151,136 @@ static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int in
     return row;
 }
 
-static void build_page(ChannelPageCtx *ctx);
+static void render_page(ChannelPageCtx *ctx);
+static void show_loading_and_poll(ChannelPageCtx *ctx);
+static void page_poll_cb(lv_timer_t *timer);
 
 static void on_prev_page(lv_event_t *e) {
     ChannelPageCtx *ctx = (ChannelPageCtx *)lv_event_get_user_data(e);
-    if (ctx && ctx->cur_page > 0) { ctx->cur_page--; build_page(ctx); }
+    if (ctx && ctx->cur_page > 0) {
+        ctx->cur_page--;
+        controller_rss_reparse(ctx->cur_page * EPISODES_PER_PAGE, EPISODES_PER_PAGE);
+        show_loading_and_poll(ctx);
+    }
 }
 static void on_next_page(lv_event_t *e) {
     ChannelPageCtx *ctx = (ChannelPageCtx *)lv_event_get_user_data(e);
-    if (ctx && ctx->cur_page < ctx->total_pages - 1) { ctx->cur_page++; build_page(ctx); }
+    if (ctx && ctx->cur_page < ctx->total_pages - 1) {
+        ctx->cur_page++;
+        controller_rss_reparse(ctx->cur_page * EPISODES_PER_PAGE, EPISODES_PER_PAGE);
+        show_loading_and_poll(ctx);
+    }
 }
 
-static void build_page(ChannelPageCtx *ctx) {
+/* Import the freshly-fetched page (g_rss_result) into the model and build the
+ * visible rows. The model holds ONLY this page's episodes, so per-page RAM stays
+ * constant regardless of how many pages (100+) the feed has. */
+static void render_page(ChannelPageCtx *ctx) {
     if (!ctx || !lv_obj_is_valid(ctx->list_container)) return;
     PodcastApp *app = &g_podcast_app;
     lv_obj_t *list = ctx->list_container;
+    rss_feed_t *rss = g_rss_result();
 
-    /* Free old arrays BEFORE cleaning UI — gives heap allocator contiguous
-     * free space to coalesce, avoiding fragmentation crashes in lv_label_create. */
+    if (!rss || rss->episode_count <= 0) return;
+
+    /* Clear old rows + per-page arrays. */
     free(ctx->track_checked); ctx->track_checked = NULL;
     free(ctx->track_cbs);     ctx->track_cbs = NULL;
     ctx->episode_count = 0;
-
     lv_obj_clean(list);
 
-    int total = app->model->current_channel_total_episodes;
-    if (total <= 0) total = podcast_model_get_current_channel_episode_count(app);
+    int n = rss->episode_count;
+    int start = ctx->cur_page * EPISODES_PER_PAGE;
+
+    /* Import this page with stable ids (channel_id * base + global index). */
+    Episode *tracks = (Episode *)heap_caps_calloc(n, sizeof(Episode), MALLOC_CAP_SPIRAM);
+    if (!tracks) { printf("[ERR] calloc tracks failed\n"); return; }
+    for (int i = 0; i < n; i++) {
+        Episode *t = &tracks[i];
+        rss_episode_t *re = &rss->episodes[i];
+        t->id         = ctx->channel_id * EPISODE_ID_PER_CHANNEL + (start + i);
+        t->channel_id = ctx->channel_id;
+        strncpy(t->title, re->title, sizeof(t->title) - 1);
+        strncpy(t->audio_url, re->audio_url, sizeof(t->audio_url) - 1);
+        strncpy(t->pub_date, re->pub_date, sizeof(t->pub_date) - 1);
+        if (re->duration[0]) {
+            char *colon = strchr(re->duration, ':');
+            t->duration_sec = colon ? atoi(re->duration) * 60 + atoi(colon + 1) : atoi(re->duration);
+        }
+    }
+    podcast_model_set_current_channel(app,
+        podcast_model_get_channel_by_id(app, ctx->channel_id),
+        tracks, n);
+    app->model->current_channel_total_episodes = rss->total_episodes;
+
+    /* Pagination bookkeeping. */
+    int total = rss->total_episodes;
     ctx->total_pages = (total + EPISODES_PER_PAGE - 1) / EPISODES_PER_PAGE;
     if (ctx->total_pages < 1) ctx->total_pages = 1;
     if (ctx->cur_page >= ctx->total_pages) ctx->cur_page = ctx->total_pages - 1;
     if (ctx->cur_page < 0) ctx->cur_page = 0;
 
-    int start = ctx->cur_page * EPISODES_PER_PAGE;
-    int end = start + EPISODES_PER_PAGE;
-    if (end > total) end = total;
-    int visible = end - start;
-
-    /* Re-parse cached RSS for this page */
-    controller_rss_reparse(start, EPISODES_PER_PAGE);
-    /* Import re-parsed episodes into model */
-    rss_feed_t *rss = g_rss_result();
-    if (g_rss_ok() && rss->episode_count > 0) {
-        Episode *tracks = (Episode *)heap_caps_calloc(rss->episode_count, sizeof(Episode), MALLOC_CAP_SPIRAM);
-        if (!tracks) { printf("[ERR] calloc tracks failed\n"); return; }
-        for (int i = 0; i < rss->episode_count; i++) {
-            Episode *t = &tracks[i];
-            rss_episode_t *re = &rss->episodes[i];
-            t->id = ctx->channel_id * 1000 + start + i;
-            t->channel_id = ctx->channel_id;
-            strncpy(t->title, re->title, sizeof(t->title) - 1);
-            strncpy(t->audio_url, re->audio_url, sizeof(t->audio_url) - 1);
-            strncpy(t->pub_date, re->pub_date, sizeof(t->pub_date) - 1);
-            strncpy(t->description, re->description, sizeof(t->description) - 1);
-            if (re->duration[0]) {
-                char *colon = strchr(re->duration, ':');
-                t->duration_sec = colon ? atoi(re->duration) * 60 + atoi(colon + 1) : atoi(re->duration);
-            }
-        }
-        podcast_model_set_current_channel(&g_podcast_app,
-            podcast_model_get_channel_by_id(&g_podcast_app, ctx->channel_id),
-            tracks, rss->episode_count);
-        g_podcast_app.model->current_channel_total_episodes = rss->total_episodes;
+    /* Build rows — the model holds only this page, so index is 0..n-1. */
+    ctx->track_checked = (bool *)calloc(n, sizeof(bool));
+    ctx->track_cbs     = (lv_obj_t **)calloc(n, sizeof(lv_obj_t *));
+    for (int i = 0; i < n; i++) {
+        const Episode *ep = podcast_model_get_current_channel_episode(app, i);
+        if (ep) create_track_row(list, ep, i, start + i + 1, ctx);
     }
+    ctx->episode_count = n;
 
-    /* Free old checkbox arrays */
-    free(ctx->track_checked); free(ctx->track_cbs);
-    ctx->track_checked = (bool *)calloc(visible, sizeof(bool));
-    ctx->track_cbs = (lv_obj_t **)calloc(visible, sizeof(lv_obj_t *));
-
-    for (int i = 0; i < visible; i++) {
-        const Episode *ep = podcast_model_get_current_channel_episode(app, start + i);
-        if (ep) create_track_row(list, ep, start + i, ctx);
-    }
-    ctx->episode_count = visible;
-
-    /* Update page label */
+    /* Page label + prev/next state. */
     if (ctx->page_label)
         lv_label_set_text_fmt(ctx->page_label, "%d/%d", ctx->cur_page + 1, ctx->total_pages);
-
-    /* Enable/disable prev/next buttons */
-    if (ctx->prev_btn) {
+    if (ctx->prev_btn)
         lv_obj_set_style_bg_color(ctx->prev_btn,
             ctx->cur_page > 0 ? lv_color_hex(0x1976D2) : lv_color_hex(0xCCCCCC), 0);
-    }
-    if (ctx->next_btn) {
+    if (ctx->next_btn)
         lv_obj_set_style_bg_color(ctx->next_btn,
             ctx->cur_page < ctx->total_pages - 1 ? lv_color_hex(0x1976D2) : lv_color_hex(0xCCCCCC), 0);
-    }
 
-    /* Reset selection */
     if (ctx->sel_label) lv_label_set_text(ctx->sel_label, "0");
     if (ctx->action_bar) lv_obj_add_flag(ctx->action_bar, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void build_track_list(lv_obj_t *list, ChannelPageCtx *ctx) {
-    if (!lv_obj_is_valid(list)) return;
-    PodcastApp *app = &g_podcast_app;
-    int count = podcast_model_get_current_channel_episode_count(app);
-    ctx->episode_count = count;
-    if (count == 0) return;
+/* Clear the list, show "Loading...", and arm the poll timer that renders the
+ * page once the async RSS fetch (already triggered by the caller) completes. */
+static void show_loading_and_poll(ChannelPageCtx *ctx) {
+    if (!ctx || !lv_obj_is_valid(ctx->list_container)) return;
 
-    ctx->cur_page = 0;
-    build_page(ctx);
+    free(ctx->track_checked); ctx->track_checked = NULL;
+    free(ctx->track_cbs);     ctx->track_cbs = NULL;
+    ctx->episode_count = 0;
+    lv_obj_clean(ctx->list_container);
+
+    ctx->loading_label = lv_label_create(ctx->list_container);
+    lv_label_set_text(ctx->loading_label, "Loading...");
+    lv_obj_center(ctx->loading_label);
+    lv_obj_set_style_text_color(ctx->loading_label, lv_color_hex(0x999999), 0);
+
+    if (ctx->poll_timer) lv_timer_del(ctx->poll_timer);
+    ctx->poll_timer = lv_timer_create(page_poll_cb, 300, ctx);
 }
 
-static void poll_tracks_cb(lv_timer_t *timer) {
+static void page_poll_cb(lv_timer_t *timer) {
     ChannelPageCtx *ctx = (ChannelPageCtx *)lv_timer_get_user_data(timer);
-    if (!ctx || ctx->tracks_built) return;
-
-    /* Stop if page was destroyed (user navigated away) */
-    if (!lv_obj_is_valid(ctx->list_container)) {
+    if (!ctx || !lv_obj_is_valid(ctx->list_container)) {
         lv_timer_del(timer); ctx->poll_timer = NULL; return;
     }
 
-    /* Check if RSS fetch is done AND matches this channel */
     if (!g_rss_done()) return;
-    if (g_rss_channel_id() != ctx->channel_id) {
-        return;
-    }
+    if (g_rss_channel_id() != ctx->channel_id) return;
 
-    ctx->tracks_built = true;
-    lv_timer_del(timer);
-    ctx->poll_timer = NULL;
+    lv_timer_del(timer); ctx->poll_timer = NULL;
+    if (ctx->loading_label) { lv_obj_del(ctx->loading_label); ctx->loading_label = NULL; }
 
-    if (ctx->loading_label) {
-        lv_obj_del(ctx->loading_label);
-        ctx->loading_label = NULL;
-    }
-
-    if (g_rss_ok() && g_rss_result()->episode_count > 0) {
-        rss_feed_t *feed = g_rss_result();
-
-        /* Import episodes as Tracks into model */
-        Episode *tracks = (Episode *)heap_caps_calloc(feed->episode_count, sizeof(Episode), MALLOC_CAP_SPIRAM);
-        if (!tracks) { printf("[ERR] calloc tracks failed\n"); return; }
-        for (int i = 0; i < feed->episode_count; i++) {
-            Episode *t = &tracks[i];
-            rss_episode_t *re = &feed->episodes[i];
-            t->id = ctx->channel_id * 1000 + i;
-            t->channel_id = ctx->channel_id;
-            strncpy(t->title, re->title, sizeof(t->title) - 1);
-            strncpy(t->audio_url, re->audio_url, sizeof(t->audio_url) - 1);
-            strncpy(t->pub_date, re->pub_date, sizeof(t->pub_date) - 1);
-            strncpy(t->description, re->description, sizeof(t->description) - 1);
-            t->duration_sec = 0;
-            if (re->duration[0]) {
-                char *colon = strchr(re->duration, ':');
-                if (colon) t->duration_sec = atoi(re->duration) * 60 + atoi(colon + 1);
-                else t->duration_sec = atoi(re->duration);
-            }
-        }
-        podcast_model_set_current_channel(&g_podcast_app,
-            podcast_model_get_channel_by_id(&g_podcast_app, ctx->channel_id),
-            tracks, feed->episode_count);
-        g_podcast_app.model->current_channel_total_episodes = feed->total_episodes;
-
-        build_track_list(ctx->list_container, ctx);
-        printf("[INF] Channel: %d episodes loaded\n", feed->episode_count); fflush(stdout);
+    if (g_rss_ok() && g_rss_result() && g_rss_result()->episode_count > 0) {
+        render_page(ctx);
+        printf("[INF] Channel: page %d, %d episodes\n",
+               ctx->cur_page + 1, g_rss_result()->episode_count); fflush(stdout);
     } else {
         lv_obj_t *empty = lv_label_create(ctx->list_container);
-        const char *err = g_rss_result()->error[0]
+        const char *err = (g_rss_result() && g_rss_result()->error[0])
                           ? g_rss_result()->error
                           : "Failed to load episodes.\nCheck network connection.";
         lv_label_set_text(empty, err);
@@ -450,7 +432,7 @@ static lv_obj_t *build_action_bar(lv_obj_t *parent, ChannelPageCtx *ctx, int cha
     lv_obj_set_size(pa, 80, 28);
     lv_obj_set_style_bg_color(pa, lv_color_hex(0x1976D2), 0);
     lv_obj_t *pal = lv_label_create(pa);
-    lv_label_set_text(pal, "Play Selected");
+    lv_label_set_text(pal, "Play");
     lv_obj_center(pal);
     lv_obj_set_style_text_color(pal, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(pa, on_play_selected_clicked, LV_EVENT_CLICKED, ctx);
@@ -467,9 +449,17 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
         free(app->view->page_nav.nav_ctx);
         app->view->page_nav.nav_ctx = NULL;
     } else {
-        /* Popping back from player/sub-page — restore from current channel */
+        /* Popping back from player/sub-page — restore from current channel.
+         * Local channel pages do not populate current_channel, so recover the
+         * owning channel from the episode that was just selected instead. */
         const Channel *ch = podcast_model_get_current_channel(app);
-        if (ch) channel_id = ch->id;
+        if (ch) {
+            channel_id = ch->id;
+        } else {
+            int episode_id = podcast_model_get_current_episode_id(app);
+            const Episode *episode = podcast_model_get_episode_by_id(app, episode_id);
+            if (episode) channel_id = episode->channel_id;
+        }
     }
 
     const Channel *channel = podcast_model_get_channel_by_id(app, channel_id);
@@ -581,29 +571,24 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
         int local_count = 0;
         for (int i = 0; i < app->model->local_episode_count; i++)
             if (app->model->local_episodes[i].channel_id == channel_id) local_count++;
-        ctx->tracks_built = true;
         ctx->episode_count = local_count;
         if (local_count > 0) {
             ctx->track_checked = (bool *)calloc(local_count, sizeof(bool));
             ctx->track_cbs = (lv_obj_t **)calloc(local_count, sizeof(lv_obj_t *));
             int row_idx = 0;
             for (int i = 0; i < app->model->local_episode_count; i++) {
-                if (app->model->local_episodes[i].channel_id == channel_id)
-                    create_track_row(list, &app->model->local_episodes[i], row_idx++, ctx);
+                if (app->model->local_episodes[i].channel_id == channel_id) {
+                    create_track_row(list, &app->model->local_episodes[i], row_idx, row_idx + 1, ctx);
+                    row_idx++;
+                }
             }
         }
-    } else if (podcast_model_get_current_channel_episode_count(app) > 0 &&
-               podcast_model_get_current_channel(app) &&
-               podcast_model_get_current_channel(app)->id == channel_id) {
-        /* Cached episodes belong to THIS channel — reuse */
-        ctx->tracks_built = true;
-        build_track_list(list, ctx);
     } else {
-        ctx->loading_label = lv_label_create(list);
-        lv_label_set_text(ctx->loading_label, "Loading episodes...");
-        lv_obj_center(ctx->loading_label);
-        lv_obj_set_style_text_color(ctx->loading_label, lv_color_hex(0x999999), 0);
-        ctx->poll_timer = lv_timer_create(poll_tracks_cb, 300, ctx);
+        /* Network channel — async fetch page 0 (already triggered above), then
+         * show loading and poll for the result. */
+        ctx->cur_page = 0;
+        ctx->total_pages = 1;
+        show_loading_and_poll(ctx);
     }
 
     printf("[INF] Channel page: %s\n", channel->title); fflush(stdout);

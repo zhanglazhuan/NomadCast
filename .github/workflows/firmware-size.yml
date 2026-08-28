@@ -1,0 +1,19 @@
+name: Firmware size gate
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.3
+          target: esp32s3
+          command: idf.py build
+      - name: Check built firmware size
+        run: python3 tools/check_firmware_size.py build/NomadCast.bin

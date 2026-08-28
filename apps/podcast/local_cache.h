@@ -1,7 +1,7 @@
 /**
  * @file local_cache.h
  * @brief Local download library index — one JSON file per channel, bucketed
- *        under .podcast/downloads/.meta/<collection_id>.json
+ *        under .nomadcast/downloads/.meta/<collection_id>.json
  */
 #ifndef LOCAL_CACHE_H
 #define LOCAL_CACHE_H

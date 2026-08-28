@@ -79,6 +79,9 @@ void app_manager_init(void);
  */
 void app_manager_add_application(application_t *app);
 
+/** Invoke each registered app's user-data factory reset callback. */
+bool app_manager_factory_reset_all(void);
+
 /**
  * @brief Start an application by name.
  * @param close_cb  Called when the app closes.

@@ -3,7 +3,7 @@
  * @brief Download-task persistence — one JSON file per task on SD card.
  *
  * Directory layout:
- *   /sdcard/.podcast/cache/download_tasks/
+ *   /sdcard/.nomadcast/cache/download_tasks/
  *       00000001.json    ← {"id":1, "ep":"...", "st":"pending", "ts":1750000000, ...}
  *       00000002.json    ← sorted by filename = download FIFO order
  *       .next_id         ← "3"  (next id to assign)
@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-#define TASK_STORE_DIR  "/sdcard/.podcast/cache/download_tasks"
+#define TASK_STORE_DIR  "/sdcard/.nomadcast/cache/download_tasks"
 #define TASK_TTL_DAYS   3
 
 /** Scan the directory and populate model->download_tasks[] with tasks

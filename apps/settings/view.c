@@ -11,6 +11,7 @@
 #include "subpages/view_update.h"
 #include "subpages/view_wifi_connect.h"
 #include "subpages/view_about.h"
+#include "subpages/view_ota_status.h"
 #include "esp_log.h"
 
 static const char *TAG = "settings_view";
@@ -36,8 +37,9 @@ void settings_view_init(struct SettingsApp* app) {
     settings_view_update_init_registry(app);
     settings_view_wifi_connect_init_registry(app);
     settings_view_about_init_registry(app);
+    settings_view_ota_status_init_registry(app);
 
-    ESP_LOGI(TAG, "init done (7 pages registered)");
+    ESP_LOGI(TAG, "init done (8 pages registered)");
 }
 
 void settings_view_deinit(struct SettingsApp* app) {

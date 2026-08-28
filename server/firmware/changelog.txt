@@ -1,0 +1,2 @@
+- OTA update testing
+- Fixed audio pause/resume crash

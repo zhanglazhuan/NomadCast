@@ -42,6 +42,7 @@ void settings_model_init(struct SettingsApp* app) {
     app->model->language_idx = flash_get_i32("settings", "lang", 0);
     app->model->time_format_24h = flash_get_bool("settings", "fmt24", true);
     app->model->sleep_timeout_min = flash_get_i32("settings", "sleep", 5);
+    app->model->auto_power_off_min = flash_get_i32("settings", "auto_power_off", 15);
     app->model->wifi_enabled = flash_get_bool("settings", "wifi", true);
     /* Restore WiFi state from hardware (survives app exit/re-enter) */
     app->model->connected_ssid[0] = '\0';
@@ -49,11 +50,12 @@ void settings_model_init(struct SettingsApp* app) {
     app->model->scanned_count = 0;
     app->model->wifi_scanning = false;
     app->model->wifi_scan_autoconnect = false;
-    app->model->auto_update = flash_get_bool("settings", "autoup", true);
+    app->model->auto_update = flash_get_bool("settings", "autoup", false);
     app->model->update_checking = false;
 
-    /* Sync sleep monitor with loaded timeout */
+    /* Sync sleep monitor with loaded timeouts */
     sleep_monitor_set_timeout(app->model->sleep_timeout_min);
+    sleep_monitor_set_auto_power_off_timeout(app->model->auto_power_off_min);
 
     /* Sync clock with loaded settings */
     clock_set_timezone(app->model->timezone_idx);
@@ -135,6 +137,17 @@ void settings_model_set_sleep_timeout(struct SettingsApp* app, int minutes) {
     flash_set_i32("settings", "sleep", minutes);
     sleep_monitor_set_timeout(minutes);
     ESP_LOGI(TAG, "sleep timeout set to %d min",minutes);
+}
+
+int settings_model_get_auto_power_off(struct SettingsApp* app) {
+    return app->model ? app->model->auto_power_off_min : 15;
+}
+void settings_model_set_auto_power_off(struct SettingsApp* app, int minutes) {
+    if (!app->model) return;
+    app->model->auto_power_off_min = minutes;
+    flash_set_i32("settings", "auto_power_off", minutes);
+    sleep_monitor_set_auto_power_off_timeout(minutes);
+    ESP_LOGI(TAG, "auto power-off set to %d min", minutes);
 }
 
 /* ── WIFI ──────────────────────────────────────────────────────────────────── */
@@ -360,14 +373,14 @@ int settings_model_get_storage_total_mb(struct SettingsApp* app) {
 
 void settings_model_clean_storage(struct SettingsApp* app) {
     (void)app;
-    /* TODO: implement actual cleanup (delete .podcast/downloads/ etc.) */
+    /* TODO: implement actual cleanup (delete .nomadcast/downloads/ etc.) */
     ESP_LOGI(TAG, "storage clean requested (not yet implemented)");
 }
 
 /* ── Update ─────────────────────────────────────────────────────────────────── */
 
 bool settings_model_get_auto_update(struct SettingsApp* app) {
-    return app->model ? app->model->auto_update : true;
+    return app->model ? app->model->auto_update : false;
 }
 void settings_model_set_auto_update(struct SettingsApp* app, bool enabled) {
     if (!app->model) return;

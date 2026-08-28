@@ -12,6 +12,8 @@
 #include "hal.h"
 #include "lv_page.h"
 #include "lv_toast.h"
+#include "lv_bottom_sheet.h"
+#include "view_ota_status.h"
 #include "ota.h"
 #include "flash_store.h"
 #include "esp_system.h"
@@ -20,9 +22,7 @@
 
 extern SettingsApp g_settings_app;
 
-/* Default manifest URL — empty means "not configured".
- * Flash key "upd_url" can override it. */
-#define DEFAULT_MANIFEST_URL "http://192.168.137.1:5000/api/ota/check"
+/* Default manifest URL — flash key "upd_url" can override it (see ota.h). */
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -31,7 +31,7 @@ static const char *get_manifest_url(void) {
     flash_get_str("settings", "upd_url", url, sizeof(url), "");
     if (url[0] == '\0') {
         /* No URL configured — use default */
-        return DEFAULT_MANIFEST_URL;
+        return OTA_DEFAULT_MANIFEST_URL;
     }
     return url;
 }
@@ -41,16 +41,45 @@ static bool url_looks_valid(const char *url) {
     return (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
 }
 
+/* Render changelog as up to `max_lines` single-line labels. Each item stays on
+ * one line (ellipsis-truncated), never wrapping — so the card height is fixed. */
+static void add_changelog_lines(lv_obj_t *parent, const char *changelog, int max_lines) {
+    if (!changelog || !changelog[0]) return;
+
+    char buf[256];
+    strncpy(buf, changelog, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    int shown = 0;
+    char *line = buf;
+    for (char *p = buf; *p; p++) {
+        if (*p == '\n') {
+            *p = '\0';
+            if (*line && shown < max_lines) {
+                lv_obj_t *lbl = lv_label_create(parent);
+                lv_label_set_text(lbl, line);
+                lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+                lv_obj_set_width(lbl, LV_PCT(100));
+                lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
+                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+                shown++;
+            }
+            line = p + 1;
+        }
+    }
+    if (*line && shown < max_lines) {
+        lv_obj_t *lbl = lv_label_create(parent);
+        lv_label_set_text(lbl, line);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(lbl, LV_PCT(100));
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+    }
+}
+
 /* ── Toast wrappers ─────────────────────────────────────────────────────── */
 
 static void toast(const char *msg) { lv_toast_show(msg, 3000); }
-
-/* ── Dialog helpers ─────────────────────────────────────────────────────── */
-
-static void delete_parent_parent(lv_event_t *e) {
-    lv_obj_t *o = lv_obj_get_parent(lv_obj_get_parent(lv_event_get_target(e)));
-    lv_obj_delete(o);
-}
 
 /* ── Auto update switch ───────────────────────────────────────────────────── */
 
@@ -64,35 +93,98 @@ static void on_auto_update_switch(lv_event_t *e) {
 
 /* ── Firmware URL preserved across OTA check → install flow ─────────────── */
 static char s_firmware_url[512];
+/* ── Container holding inline update cards (created in build_update_page) ── */
+static lv_obj_t *s_cards_container = NULL;
 
 static void on_ota_progress(int percent, void *user_data)
 {
     (void)user_data;
-    /* Simple toast feedback */
-    static char buf[32];
-    snprintf(buf, sizeof(buf), "Updating... %d%%", percent);
-    lv_toast_show(buf, 1000);
+    /* Runs on the esp_event loop task (sys_evt), NOT the LVGL thread — just
+     * record the value; the OTA Status page's poll timer renders it. */
+    g_ota_progress = percent;
+}
+
+static void ota_worker_task(void *arg)
+{
+    (void)arg;
+    bool ok = ota_perform(s_firmware_url, on_ota_progress, NULL);
+    if (ok) {
+        g_ota_progress = 100;
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        esp_restart();
+    } else {
+        g_ota_progress = -2;   /* signal the OTA Status page to show failure */
+    }
+    vTaskDelete(NULL);
+}
+
+static lv_bottom_sheet_t *s_ota_sheet = NULL;
+
+static void on_confirm_ota(lv_event_t *e)
+{
+    (void)e;
+    if (s_ota_sheet) { lv_bottom_sheet_close(s_ota_sheet); s_ota_sheet = NULL; }
+
+    g_ota_progress = -1;
+    PAGE_NAVIGATE_TO((&g_settings_app), SETTINGS_PAGE_UPDATE, SETTINGS_PAGE_OTA_STATUS, NULL);
+
+    /* Run OTA in a separate task so the LVGL thread stays free to refresh the
+     * progress bar. ota_perform() blocks until download+flash completes. */
+    xTaskCreate(ota_worker_task, "ota_work", 8192, NULL, 5, NULL);
+}
+
+static void on_cancel_ota(lv_event_t *e)
+{
+    (void)e;
+    if (s_ota_sheet) { lv_bottom_sheet_close(s_ota_sheet); s_ota_sheet = NULL; }
 }
 
 static void on_install_clicked(lv_event_t *e)
 {
-    lv_obj_t *overlay = lv_obj_get_parent(lv_obj_get_parent(lv_event_get_target(e)));
-    lv_obj_delete(overlay);
+    (void)e;
+    /* Show a bottom sheet with OTA precautions, then confirm to proceed. */
+    lv_obj_t *scr = lv_screen_active();
+    s_ota_sheet = lv_bottom_sheet_create(scr);
 
-    lv_toast_show("Downloading update...", 2000);
-    if (ota_perform(s_firmware_url, on_ota_progress, NULL)) {
-        lv_toast_show("Update complete — rebooting", 2000);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        esp_restart();
-    } else {
-        lv_toast_show("Update failed", 3000);
-    }
+    lv_obj_t *content = lv_bottom_sheet_get_content(s_ota_sheet);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(content, 16, 0);
+    lv_obj_set_style_pad_row(content, 12, 0);
+
+    lv_obj_t *title = lv_label_create(content);
+    lv_label_set_text(title, "OTA Update");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+
+    lv_obj_t *warn = lv_label_create(content);
+    lv_label_set_text(warn, "Battery must be at least 30%.\nDo not power off during the update.");
+    lv_obj_set_style_text_color(warn, lv_color_hex(0xE53935), 0);
+    lv_obj_set_style_text_font(warn, &lv_font_montserrat_14, 0);
+
+    lv_obj_t *confirm = lv_button_create(content);
+    lv_obj_set_size(confirm, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(confirm, lv_color_hex(0x4CAF50), 0);
+    lv_obj_set_style_radius(confirm, 6, 0);
+    lv_obj_add_event_cb(confirm, on_confirm_ota, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cfl = lv_label_create(confirm);
+    lv_label_set_text(cfl, "Confirm");
+    lv_obj_center(cfl);
+    lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
+
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_radius(cancel, 6, 0);
+    lv_obj_add_event_cb(cancel, on_cancel_ota, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ccl = lv_label_create(cancel);
+    lv_label_set_text(ccl, "Cancel");
+    lv_obj_center(ccl);
 }
 
 static void on_ota_checked(ota_check_result_t result,
                             const char *new_version,
                             const char *changelog,
                             const char *firmware_url,
+                            const char *release_date,
                             void *user_data)
 {
     (void)user_data;
@@ -104,53 +196,62 @@ static void on_ota_checked(ota_check_result_t result,
 
     case OTA_CHECK_UPDATE_AVAILABLE: {
         if (firmware_url) snprintf(s_firmware_url, sizeof(s_firmware_url), "%s", firmware_url);
-        lv_obj_t *scr = lv_screen_active();
-        lv_obj_t *overlay = lv_obj_create(scr);
-        lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);
-        lv_obj_set_style_border_width(overlay, 0, 0);
-        lv_obj_center(overlay);
+        if (!s_cards_container || !lv_obj_is_valid(s_cards_container)) break;
 
-        lv_obj_t *dlg = lv_obj_create(overlay);
-        lv_obj_set_size(dlg, 220, 160);
-        lv_obj_center(dlg);
-        lv_obj_set_style_radius(dlg, 8, 0);
-        lv_obj_set_flex_flow(dlg, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_all(dlg, 16, 0);
-        lv_obj_set_style_pad_row(dlg, 8, 0);
+        /* Clear any previous update cards, then show the newest one inline. */
+        lv_obj_clean(s_cards_container);
 
-        lv_obj_t *title = lv_label_create(dlg);
-        lv_label_set_text_fmt(title, "New version: %s", new_version);
+        lv_obj_t *card = lv_obj_create(s_cards_container);
+        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);       /* 改为内容自适应高度，紧凑显示，避免留白和截断按钮 */
+        lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(card, 1, 0);                 /* 灰色边框 — 标记"新版本"区域 */
+        lv_obj_set_style_border_color(card, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_radius(card, 8, 0);
+        lv_obj_set_style_pad_all(card, 12, 0);
+        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);           /* 上下排:信息在上,按钮在底 */
+        lv_obj_set_style_pad_row(card, 10, 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);           /* 不要竖向滚动 */
+        lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);
+
+        /* 信息区:版本名 + 上线日期 + changelog(最多3条) */
+        lv_obj_t *info = lv_obj_create(card);
+        lv_obj_set_width(info, LV_PCT(100));
+        lv_obj_set_height(info, LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_all(info, 0, 0);
+        lv_obj_set_style_border_width(info, 0, 0);
+        lv_obj_set_style_bg_opa(info, LV_OPA_TRANSP, 0);
+        lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(info, 4, 0);
+        lv_obj_clear_flag(info, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(info, LV_SCROLLBAR_MODE_OFF);
+
+        /* 标题直接用版本名 */
+        lv_obj_t *title = lv_label_create(info);
+        lv_label_set_text(title, new_version ? new_version : "");
         lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
 
-        if (changelog && changelog[0]) {
-            lv_obj_t *cl = lv_label_create(dlg);
-            lv_label_set_text(cl, changelog);
-            lv_obj_set_style_text_color(cl, lv_color_hex(0x666666), 0);
-            lv_obj_set_style_text_font(cl, &lv_font_montserrat_12, 0);
+        if (release_date && release_date[0]) {
+            lv_obj_t *date = lv_label_create(info);
+            lv_label_set_text_fmt(date, "Released: %s", release_date);
+            lv_obj_set_style_text_color(date, lv_color_hex(0x888888), 0);
+            lv_obj_set_style_text_font(date, &lv_font_montserrat_12, 0);
         }
 
-        lv_obj_t *btn_row = lv_obj_create(dlg);
-        lv_obj_set_size(btn_row, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_all(btn_row, 0, 0);
-        lv_obj_set_style_border_width(btn_row, 0, 0);
-        lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, 0);
+        /* 最多显示3条，单行截断不跨行 */
+        add_changelog_lines(info, changelog, 3);
 
-        lv_obj_t *cancel = lv_button_create(btn_row);
-        lv_obj_set_flex_grow(cancel, 1);
-        lv_obj_t *ca_lb = lv_label_create(cancel);
-        lv_label_set_text(ca_lb, "Later");
-        lv_obj_center(ca_lb);
-        lv_obj_add_event_cb(cancel, delete_parent_parent, LV_EVENT_CLICKED, NULL);
-
-        lv_obj_t *install = lv_button_create(btn_row);
-        lv_obj_set_flex_grow(install, 1);
+        /* 底部:OTA Now 按钮 (整行宽) */
+        lv_obj_t *install = lv_button_create(card);
+        lv_obj_set_size(install, LV_PCT(100), 40);
         lv_obj_set_style_bg_color(install, lv_color_hex(0x4CAF50), 0);
+        lv_obj_set_style_radius(install, 6, 0);
         lv_obj_t *in_lb = lv_label_create(install);
-        lv_label_set_text(in_lb, "Install");
-        lv_obj_set_style_text_color(in_lb, lv_color_hex(0xFFFFFF), 0);
+        lv_label_set_text(in_lb, "OTA Now");
         lv_obj_center(in_lb);
+        lv_obj_set_style_text_color(in_lb, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_font(in_lb, &lv_font_montserrat_14, 0);
         lv_obj_add_event_cb(install, on_install_clicked, LV_EVENT_CLICKED, NULL);
         break;
     }
@@ -186,7 +287,6 @@ static void on_check_update_clicked(lv_event_t *e) {
         return;
     }
 
-    toast("Checking for updates...");
     ota_check(url, on_ota_checked, NULL);
 }
 
@@ -194,6 +294,8 @@ static void on_check_update_clicked(lv_event_t *e) {
 
 static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
     (void)user_data;
+
+    s_cards_container = NULL;
 
     Page page = lv_page_create("Update", true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_t *cont = page.container;
@@ -223,14 +325,6 @@ static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
     if (auto_up) lv_obj_add_state(sw_auto, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw_auto, on_auto_update_switch, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* Description */
-    lv_obj_t *lb_desc = lv_label_create(cont);
-    lv_label_set_text(lb_desc, auto_up
-        ? "Updates will be downloaded and installed automatically."
-        : "You will be notified when updates are available.");
-    lv_obj_set_style_text_font(lb_desc, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(lb_desc, lv_color_hex(0x888888), 0);
-
     /* Check for update button */
     lv_obj_t *btn = lv_button_create(cont);
     lv_obj_set_size(btn, LV_PCT(100), 40);
@@ -241,6 +335,16 @@ static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
     lv_obj_set_style_text_color(lb_btn, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(lb_btn, &lv_font_montserrat_16, 0);
     lv_obj_add_event_cb(btn, on_check_update_clicked, LV_EVENT_CLICKED, NULL);
+
+    /* ── Update cards container (populated when a new version is found) ── */
+    s_cards_container = lv_obj_create(cont);
+    lv_obj_set_size(s_cards_container, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_cards_container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(s_cards_container, 0, 0);
+    lv_obj_set_style_pad_row(s_cards_container, 8, 0);
+    lv_obj_set_style_border_width(s_cards_container, 0, 0);
+    lv_obj_set_style_bg_opa(s_cards_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_scrollbar_mode(s_cards_container, LV_SCROLLBAR_MODE_OFF);
 
     return page.screen;
 }

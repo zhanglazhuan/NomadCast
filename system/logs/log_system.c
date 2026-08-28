@@ -27,22 +27,21 @@ static const char *TAG = "log_sys";
 #define MAX_SESSIONS    20
 #define MAX_SESSION_AGE_SEC (7 * 86400)
 
-/* ── Ring buffer ────────────────────────────────────────────────────────── */
+typedef struct {
+    char ring[RING_LINES][MAX_LINE_LEN];
+    int ring_head;   /* Next write position. */
+    int ring_count;  /* Lines waiting to flush. */
+    SemaphoreHandle_t ring_mutex;
+    FILE *session_file;
+    char session_name[64]; /* e.g. "s_20260723_143052" */
+    bool initialized;
+    bool truncated;
+    uint32_t session_bytes;
+    uint32_t line_count;
+    esp_timer_handle_t flush_timer;
+} log_system_state_t;
 
-static char     s_ring[RING_LINES][MAX_LINE_LEN];
-static int      s_ring_head = 0;   /* next write position */
-static int      s_ring_count = 0;  /* lines waiting to flush */
-static SemaphoreHandle_t s_ring_mutex = NULL;
-
-/* ── Session state ──────────────────────────────────────────────────────── */
-
-static FILE    *s_session_file = NULL;
-static char     s_session_name[64];  /* e.g. "s_20260723_143052" */
-static bool     s_initialized = false;
-static bool     s_truncated = false;
-static uint32_t s_session_bytes = 0;
-static uint32_t s_line_count = 0;
-static esp_timer_handle_t s_flush_timer = NULL;
+static log_system_state_t s_log;
 
 /* ── Forward declarations ───────────────────────────────────────────────── */
 
@@ -57,13 +56,13 @@ static void purge_old_sessions(void);
 
 void log_system_init(void)
 {
-    if (s_initialized) return;
+    if (s_log.initialized) return;
 
     ensure_log_dir();
     purge_old_sessions();
 
-    s_ring_mutex = xSemaphoreCreateMutex();
-    if (!s_ring_mutex) {
+    s_log.ring_mutex = xSemaphoreCreateMutex();
+    if (!s_log.ring_mutex) {
         ESP_LOGE(TAG, "failed to create ring mutex");
         return;
     }
@@ -81,8 +80,8 @@ void log_system_init(void)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "log_flush",
     };
-    esp_timer_create(&targs, &s_flush_timer);
-    esp_timer_start_periodic(s_flush_timer, FLUSH_INTERVAL_MS * 1000);
+    esp_timer_create(&targs, &s_log.flush_timer);
+    esp_timer_start_periodic(s_log.flush_timer, FLUSH_INTERVAL_MS * 1000);
 
     /* Initialize auto-capture */
     extern void log_capture_init(void);
@@ -92,7 +91,7 @@ void log_system_init(void)
     extern void log_uploader_start(void);
     log_uploader_start();
 
-    s_initialized = true;
+    s_log.initialized = true;
 
     /* Log boot info */
     {
@@ -102,38 +101,38 @@ void log_system_init(void)
         log_event("sys", "boot", data);
     }
 
-    ESP_LOGI(TAG, "session started: %s", s_session_name);
+    ESP_LOGI(TAG, "session started: %s", s_log.session_name);
 }
 
 void log_system_shutdown(void)
 {
-    if (!s_initialized) return;
-    s_initialized = false;
+    if (!s_log.initialized) return;
+    s_log.initialized = false;
 
     /* Stop timer first */
-    if (s_flush_timer) {
-        esp_timer_stop(s_flush_timer);
-        esp_timer_delete(s_flush_timer);
-        s_flush_timer = NULL;
+    if (s_log.flush_timer) {
+        esp_timer_stop(s_log.flush_timer);
+        esp_timer_delete(s_log.flush_timer);
+        s_log.flush_timer = NULL;
     }
 
     /* Flush remaining buffer */
     flush_ring();
     close_session();
 
-    if (s_ring_mutex) {
-        vSemaphoreDelete(s_ring_mutex);
-        s_ring_mutex = NULL;
+    if (s_log.ring_mutex) {
+        vSemaphoreDelete(s_log.ring_mutex);
+        s_log.ring_mutex = NULL;
     }
 
     ESP_LOGI(TAG, "session ended (%lu lines, %lu bytes)",
-             (unsigned long)s_line_count, (unsigned long)s_session_bytes);
+             (unsigned long)s_log.line_count, (unsigned long)s_log.session_bytes);
 }
 
 void log_event(const char *category, const char *event, const char *data_json)
 {
-    if (!s_initialized) return;
-    if (s_truncated) return;
+    if (!s_log.initialized) return;
+    if (s_log.truncated) return;
 
     /* Get timestamp */
     struct timeval tv;
@@ -162,32 +161,32 @@ void log_event(const char *category, const char *event, const char *data_json)
     }
 
     /* Check size limit before adding to ring */
-    if (s_session_bytes + len > MAX_SESSION_BYTES) {
+    if (s_log.session_bytes + len > MAX_SESSION_BYTES) {
         /* Mark truncated and write final marker */
-        s_truncated = true;
+        s_log.truncated = true;
         ESP_LOGW(TAG, "session reached %dKB limit, truncating", MAX_SESSION_KB);
         log_event("sys", "session_truncated", NULL);
         return;
     }
 
     /* Add to ring buffer */
-    if (xSemaphoreTake(s_ring_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        strncpy(s_ring[s_ring_head], line, MAX_LINE_LEN - 1);
-        s_ring[s_ring_head][MAX_LINE_LEN - 1] = '\0';
-        s_ring_head = (s_ring_head + 1) % RING_LINES;
-        if (s_ring_count < RING_LINES) {
-            s_ring_count++;
+    if (xSemaphoreTake(s_log.ring_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        strncpy(s_log.ring[s_log.ring_head], line, MAX_LINE_LEN - 1);
+        s_log.ring[s_log.ring_head][MAX_LINE_LEN - 1] = '\0';
+        s_log.ring_head = (s_log.ring_head + 1) % RING_LINES;
+        if (s_log.ring_count < RING_LINES) {
+            s_log.ring_count++;
         } else {
             /* Ring full — drop oldest (shouldn't happen with flush timer) */
             ESP_LOGW(TAG, "ring buffer overflow, dropping oldest line");
         }
-        xSemaphoreGive(s_ring_mutex);
+        xSemaphoreGive(s_log.ring_mutex);
 
-        s_session_bytes += len;
-        s_line_count++;
+        s_log.session_bytes += len;
+        s_log.line_count++;
 
         /* Flush immediately if buffer is half full */
-        if (s_ring_count >= RING_LINES / 2) {
+        if (s_log.ring_count >= RING_LINES / 2) {
             flush_ring();
         }
     }
@@ -215,70 +214,70 @@ static void open_session(void)
     struct tm tm;
     localtime_r(&now, &tm);
 
-    snprintf(s_session_name, sizeof(s_session_name),
+    snprintf(s_log.session_name, sizeof(s_log.session_name),
              "s_%04d%02d%02d_%02d%02d%02d",
              tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
              tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     char path[128];
-    snprintf(path, sizeof(path), "%s/%s.log", LOG_BASE_PATH, s_session_name);
+    snprintf(path, sizeof(path), "%s/%s.log", LOG_BASE_PATH, s_log.session_name);
 
-    s_session_file = fopen(path, "a");
-    if (!s_session_file) {
+    s_log.session_file = fopen(path, "a");
+    if (!s_log.session_file) {
         ESP_LOGE(TAG, "failed to open session file: %s", path);
         return;
     }
 
-    s_truncated = false;
-    s_session_bytes = 0;
-    s_line_count = 0;
+    s_log.truncated = false;
+    s_log.session_bytes = 0;
+    s_log.line_count = 0;
 
     /* Write session start marker */
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    fprintf(s_session_file,
+    fprintf(s_log.session_file,
             "{\"t\":%ld,\"ms\":%03d,\"c\":\"sys\",\"e\":\"session_start\",\"d\":{}}\n",
             (long)tv.tv_sec, (int)(tv.tv_usec / 1000));
-    fflush(s_session_file);
+    fflush(s_log.session_file);
 }
 
 static void close_session(void)
 {
-    if (!s_session_file) return;
+    if (!s_log.session_file) return;
 
     /* Write session end marker */
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    fprintf(s_session_file,
+    fprintf(s_log.session_file,
             "{\"t\":%ld,\"ms\":%03d,\"c\":\"sys\",\"e\":\"session_end\","
             "\"d\":{\"lines\":%lu,\"bytes\":%lu}}\n",
             (long)tv.tv_sec, (int)(tv.tv_usec / 1000),
-            (unsigned long)s_line_count, (unsigned long)s_session_bytes);
+            (unsigned long)s_log.line_count, (unsigned long)s_log.session_bytes);
 
-    fclose(s_session_file);
-    s_session_file = NULL;
+    fclose(s_log.session_file);
+    s_log.session_file = NULL;
 }
 
 static void flush_ring(void)
 {
-    if (!s_session_file) return;
-    if (s_ring_count == 0) return;
+    if (!s_log.session_file) return;
+    if (s_log.ring_count == 0) return;
 
-    if (xSemaphoreTake(s_ring_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    if (xSemaphoreTake(s_log.ring_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
 
-    int count = s_ring_count;
-    int start = (s_ring_head - count + RING_LINES) % RING_LINES;
+    int count = s_log.ring_count;
+    int start = (s_log.ring_head - count + RING_LINES) % RING_LINES;
 
     for (int i = 0; i < count; i++) {
         int idx = (start + i) % RING_LINES;
-        fputs(s_ring[idx], s_session_file);
-        s_ring[idx][0] = '\0';
+        fputs(s_log.ring[idx], s_log.session_file);
+        s_log.ring[idx][0] = '\0';
     }
 
-    s_ring_count = 0;
-    fflush(s_session_file);
+    s_log.ring_count = 0;
+    fflush(s_log.session_file);
 
-    xSemaphoreGive(s_ring_mutex);
+    xSemaphoreGive(s_log.ring_mutex);
 }
 
 static void flush_timer_cb(void *arg)

@@ -36,6 +36,9 @@ void sleep_monitor_init(esp_lcd_panel_handle_t panel,
  */
 void sleep_monitor_set_power_pin(gpio_num_t pin);
 
+/** Set the backlight GPIO. Sleep turns it LOW (dark), wake turns it HIGH. */
+void sleep_monitor_set_backlight_pin(gpio_num_t pin);
+
 /**
  * @brief Register a callback for re-initializing hardware after wake.
  *
@@ -70,6 +73,28 @@ void sleep_monitor_notify_activity(void);
 
 /** True if the device is currently sleeping (display off, touch disabled). */
 bool sleep_monitor_is_sleeping(void);
+
+/**
+ * @brief Auto power-off: after `min` minutes of idle inactivity, and only if
+ *        the power-off check says it's safe, invoke the power-off action.
+ *        Independent of the screen-off sleep state (a sleeping device still
+ *        shuts down at the deadline). 0 = disabled.
+ */
+void sleep_monitor_set_auto_power_off_timeout(int min);
+
+/** Get the current auto power-off timeout (minutes, 0 = disabled). */
+int sleep_monitor_get_auto_power_off_timeout(void);
+
+/** Return true only when it is safe to power off (e.g. no download in
+ *  progress, audio not playing). If no check is registered, power off is
+ *  considered safe. */
+typedef bool (*sleep_monitor_power_off_check_t)(void);
+void sleep_monitor_set_power_off_check(sleep_monitor_power_off_check_t cb);
+
+/** Action invoked on auto power-off (e.g. deep-sleep shutdown). If unset,
+ *  falls back to esp_deep_sleep_start(). */
+typedef void (*sleep_monitor_power_off_action_t)(void);
+void sleep_monitor_set_power_off_action(sleep_monitor_power_off_action_t cb);
 
 #ifdef __cplusplus
 }

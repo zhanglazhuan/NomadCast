@@ -29,6 +29,7 @@ typedef struct SettingsModel {
     int  language_idx;       // 0=CN, 1=EN, ...
     bool time_format_24h;    // true=24h, false=12h
     int  sleep_timeout_min;  // 0=never, 1/2/5/10/15/30/60 minutes
+    int  auto_power_off_min; // 0=never, 5/10/15/30/60 minutes (default 15)
 
     // WIFI
     bool wifi_enabled;
@@ -74,6 +75,8 @@ bool settings_model_get_time_format_24h(struct SettingsApp* app);
 void settings_model_set_time_format_24h(struct SettingsApp* app, bool fmt24);
 int  settings_model_get_sleep_timeout(struct SettingsApp* app);
 void settings_model_set_sleep_timeout(struct SettingsApp* app, int minutes);
+int  settings_model_get_auto_power_off(struct SettingsApp* app);
+void settings_model_set_auto_power_off(struct SettingsApp* app, int minutes);
 
 /* ── WIFI ──────────────────────────────────────────────────────────────────── */
 

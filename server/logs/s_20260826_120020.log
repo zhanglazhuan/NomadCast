@@ -1,0 +1,3 @@
+{"t":1787716820,"ms":561,"c":"sys","e":"session_start","d":{}}
+{"t":1787716820,"ms":565,"c":"sys","e":"boot","d":{"heap_free":8340224}}
+{"t":1787716826,"ms":580,"c":"sys","e":"session_end","d":{"lines":1,"bytes":73}}

@@ -20,6 +20,17 @@ static char g_http_last_error[128];
 
 const char *http_last_error(void) { return g_http_last_error; }
 
+/* Xiaoyuzhou's track URL embeds the final CDN path.  Some ESP-TLS/server
+ * combinations expose a 302 response but not its Location header, so derive
+ * the equivalent CDN URL as a bounded fallback. */
+static bool derive_xiaoyuzhou_cdn_url(const char *url, char *out, size_t out_sz)
+{
+    const char *marker = strstr(url, "media.xyzcdn.net/");
+    if (!marker) return false;
+    int n = snprintf(out, out_sz, "https://%s", marker);
+    return n > 0 && (size_t)n < out_sz;
+}
+
 void http_client_init(void) { /* no-op */ }
 void http_client_deinit(void) { /* no-op */ }
 
@@ -193,22 +204,43 @@ bool http_download_to_file(const char *url, const char *file_path,
         mkdir(tmp, 0755);
     }
 
-    /* Follow redirects manually — audio CDNs return 302 to signed URLs */
+    /* Let esp_http_client follow CDN redirects.  In particular, the
+     * xiaoyuzhou endpoint can return a redirect to a signed CDN URL and can
+     * legitimately use more than one hop.  Manual Location handling was
+     * prone to treating a repeated/normalized Location as a redirect loop. */
     char current_url[1024];
     snprintf(current_url, sizeof(current_url), "%s", url);
 
-    for (int redirect = 0; redirect < 5; redirect++) {
+    for (int redirect = 0; redirect < 10; redirect++) {
         esp_http_client_config_t cfg = {
             .url = current_url,
-            .timeout_ms = 60000,
-            .buffer_size = 8192,
+            .timeout_ms = 120000,
+            .buffer_size = 16384,
             .crt_bundle_attach = esp_crt_bundle_attach,
-            .max_redirection_count = 0,  /* we handle redirects manually */
+            .max_redirection_count = 0,
+            .disable_auto_redirect = true,
         };
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (!client) {
             ESP_LOGE(TAG, "dl: failed to init client");
             return false;
+        }
+
+        /* Some CDN edges reset the TLS session when they see the tiny
+         * ESP-IDF default user-agent/keep-alive pattern.  Use ordinary media
+         * download headers and request a cleanly terminated response. */
+        esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0");
+        esp_http_client_set_header(client, "Accept", "audio/mp4,audio/*,*/*;q=0.8");
+        esp_http_client_set_header(client, "Connection", "close");
+
+        struct stat existing_st;
+        long resume_offset = (stat(file_path, &existing_st) == 0 &&
+                              existing_st.st_size > 0) ? (long)existing_st.st_size : 0;
+        if (resume_offset > 0) {
+            char range[64];
+            snprintf(range, sizeof(range), "bytes=%ld-", resume_offset);
+            esp_http_client_set_header(client, "Range", range);
+            ESP_LOGI(TAG, "dl: resuming at byte %ld", resume_offset);
         }
 
         esp_err_t err = esp_http_client_open(client, 0);
@@ -222,17 +254,34 @@ bool http_download_to_file(const char *url, const char *file_path,
         int status = esp_http_client_get_status_code(client);
 
         if (status == 301 || status == 302 || status == 307 || status == 308) {
-            /* Follow the redirect */
+            /* A redirect can remain only when the client exhausted its
+             * built-in limit.  Preserve the old fallback for unusual CDN
+             * responses, but do not spin on the same Location forever. */
             char *loc = NULL;
             esp_http_client_get_header(client, "Location", &loc);
-            if (loc && loc[0]) snprintf(current_url, sizeof(current_url), "%s", loc);
+            char next_url[1024];
+            bool have_next = loc && loc[0] && strcmp(loc, current_url) != 0;
+            if (have_next) {
+                snprintf(next_url, sizeof(next_url), "%s", loc);
+            } else if (derive_xiaoyuzhou_cdn_url(current_url, next_url, sizeof(next_url)) &&
+                       strcmp(next_url, current_url) != 0) {
+                ESP_LOGW(TAG, "dl: 302 Location unavailable; derived CDN URL");
+                have_next = true;
+            }
+            if (!have_next) {
+                ESP_LOGE(TAG, "dl: redirect loop or missing Location (%s)", current_url);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return false;
+            }
+            snprintf(current_url, sizeof(current_url), "%s", next_url);
             ESP_LOGI(TAG, "dl: redirect %d → %s", status, current_url);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);
             continue;
         }
 
-        if (status != 200) {
+        if (status != 200 && status != 206) {
             ESP_LOGE(TAG, "dl: HTTP %d for %s", status, current_url);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);
@@ -240,7 +289,11 @@ bool http_download_to_file(const char *url, const char *file_path,
         }
         ESP_LOGI(TAG, "dl: %s → HTTP 200, len=%d", current_url, content_len);
 
-        FILE *f = fopen(file_path, "wb");
+        /* A server honoring Range returns 206 and the response length is only
+         * the remaining suffix.  If it ignores Range (200), restart safely. */
+        bool resumed = (status == 206 && resume_offset > 0);
+        long base_offset = resumed ? resume_offset : 0;
+        FILE *f = fopen(file_path, resumed ? "ab" : "wb");
         if (!f) {
             ESP_LOGE(TAG, "dl: cannot open %s", file_path);
             esp_http_client_close(client);
@@ -250,7 +303,7 @@ bool http_download_to_file(const char *url, const char *file_path,
 
         /* Heap buffer — 8KB on task stack would risk overflow */
         char *buf = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
-        int total = 0, last_log = 0;
+        int total = (int)base_offset, last_log = total;
         bool first_chunk = true;
         bool aborted = false;
         int64_t win_start_us = esp_timer_get_time();  /* speed-window start */
@@ -263,7 +316,7 @@ bool http_download_to_file(const char *url, const char *file_path,
                     ESP_LOGI(TAG, "dl: streaming started");
                     first_chunk = false;
                 }
-                fwrite(buf, 1, n, f);
+                if (fwrite(buf, 1, n, f) != (size_t)n) { aborted = true; break; }
                 total     += n;
                 win_bytes += n;
                 /* Briefly yield every ~192KB so SPI LCD can grab the
@@ -272,17 +325,24 @@ bool http_download_to_file(const char *url, const char *file_path,
                 if ((total & 0x2FFFF) == 0) vTaskDelay(1);
 
                 /* ~500ms sliding window → instantaneous speed (bytes/sec) */
+                int speed_bps = 0;
                 int64_t now_us = esp_timer_get_time();
                 int64_t win_us = now_us - win_start_us;
                 if (win_us >= 500000) {
-                    int speed_bps = (int)((int64_t)win_bytes * 1000000 / win_us);
-                    if (progress_cb && !progress_cb(total, content_len, speed_bps)) {
-                        ESP_LOGW(TAG, "dl: aborted by caller");
-                        aborted = true;
-                        break;
-                    }
+                    speed_bps = (int)((int64_t)win_bytes * 1000000 / win_us);
                     win_start_us = now_us;
                     win_bytes    = 0;
+                }
+
+                /* Check cancel/pause on EVERY chunk — not just the 500ms speed
+                 * tick — so Delete/Pause stops the transfer immediately (by the
+                 * next 8 KB read) instead of up to 500 ms later. The callback
+                 * skips its speed smoothing when speed_bps is 0, so calling it
+                 * between window boundaries is cheap. */
+                if (progress_cb && !progress_cb(total, content_len, speed_bps)) {
+                    ESP_LOGW(TAG, "dl: aborted by caller");
+                    aborted = true;
+                    break;
                 }
 
                 if (total - last_log >= 256 * 1024) {
@@ -292,7 +352,13 @@ bool http_download_to_file(const char *url, const char *file_path,
             }
             free(buf);
         }
-        fclose(f);
+        if (fclose(f) != 0) aborted = true;
+
+        /* With chunked/unknown-length responses, a read returning 0 is not
+         * sufficient evidence of a clean EOF: the connection may have been
+         * reset mid-transfer. Ask esp_http_client whether all response data
+         * was received before accepting the file. */
+        bool complete_received = esp_http_client_is_complete_data_received(client);
 
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -303,11 +369,14 @@ bool http_download_to_file(const char *url, const char *file_path,
             return false;
         }
 
-        if (total > 0) {
+        int expected_total = content_len > 0 ? (int)base_offset + content_len : 0;
+        if (total > 0 && (content_len > 0 ? total == expected_total : complete_received)) {
             ESP_LOGI(TAG, "dl: saved %d bytes to %s", total, file_path);
             return true;
         } else {
-            unlink(file_path);
+            if (content_len > 0 && total != expected_total)
+                ESP_LOGE(TAG, "dl: truncated response (%d/%d bytes)", total, expected_total);
+            /* Keep the verified prefix so the next attempt can use Range. */
             return false;
         }
     }

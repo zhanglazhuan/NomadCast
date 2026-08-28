@@ -12,3 +12,6 @@ dependencies:
   joltwallet/littlefs: '*'
   espressif/button: '*'
   espressif/esp_jrnl: '*'
+  # esp-adf-libs' CMakeLists REQUIRES nghttp (HTTP/2); the component manager
+  # drops it unless it's an explicit manifest dependency.
+  espressif/nghttp: '*'

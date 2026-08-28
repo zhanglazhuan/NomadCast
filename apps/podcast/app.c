@@ -13,6 +13,7 @@
 #include "cache.h"
 #include "local_cache.h"
 #include "hal.h"
+#include "flash_store.h"
 
 PodcastApp g_podcast_app;
 
@@ -29,6 +30,7 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
     (void)root; (void)group;
 
     podcast_model_init(&g_podcast_app);
+    if (!g_podcast_app.model) { ESP_LOGE(TAG, "model init failed"); return; }
     task_store_load(&g_podcast_app);   /* restore persisted download tasks */
 
     /* Seed the local library from .meta.json BEFORE any completion can rewrite
@@ -52,8 +54,6 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
         }
     }
 
-    if (hal_wifi_is_connected())       /* resume if WiFi already up */
-        podcast_controller_resume_downloads(&g_podcast_app);
     cache_playback_init(&g_podcast_app);
     podcast_view_init(&g_podcast_app);
     g_podcast_app.view->page_nav.nav_ctx = NULL;
@@ -67,11 +67,13 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
      * LVGL overhead.  We've found that after the network page (tabview,
      * FABs, etc.) is built, TLS handshakes to Apple CDN timeout.
      * Hypothesis: LVGL's rendering state interferes with TCP/IP stack. */
+    podcast_controller_init(&g_podcast_app);
+    if (!g_podcast_app.controller) { ESP_LOGE(TAG, "controller init failed"); return; }
+    g_podcast_app.controller->model = g_podcast_app.model;
+    g_podcast_app.controller->view  = g_podcast_app.view;
     if (hal_wifi_is_connected()) {
         ESP_LOGI(TAG, "WiFi connected, chart fetch on category select");
-        podcast_controller_init(&g_podcast_app);
-        g_podcast_app.controller->model = g_podcast_app.model;
-        g_podcast_app.controller->view  = g_podcast_app.view;
+        podcast_controller_resume_downloads(&g_podcast_app);
         /* Chart is fetched on-demand when the user selects a category
          * from the dropdown — no auto-fetch at startup. */
         podcast_model_set_net_state(&g_podcast_app, NET_STATE_IDLE, NULL);
@@ -120,6 +122,13 @@ static bool podcast_app_back(void)
     return page_navigator_navigate_pop(&g_podcast_app.view->page_nav, &g_podcast_app);
 }
 
+bool podcast_app_factory_reset(void)
+{
+    ESP_LOGI("podcast", "factory reset: erasing podcast settings");
+    flash_erase_ns("podcast");
+    return true;
+}
+
 /* ---- App descriptor ---- */
 
 static application_t podcast_app_desc = {
@@ -128,6 +137,7 @@ static application_t podcast_app_desc = {
     .start_func = podcast_app_start,
     .stop_func  = podcast_app_stop,
     .back_func  = podcast_app_back,
+    .factory_reset_func = podcast_app_factory_reset,
     .hidden     = false,
     .category   = APP_CATEGORY_TOOLS,
 };

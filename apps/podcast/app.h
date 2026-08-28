@@ -19,6 +19,7 @@ extern PodcastApp g_podcast_app;
 void podcast_app_init(void);
 void podcast_app_deinit(void);
 void podcast_app_register(void);
+bool podcast_app_factory_reset(void);
 void podcast_app_startup(void);
 
 #endif // PODCAST_APP_H

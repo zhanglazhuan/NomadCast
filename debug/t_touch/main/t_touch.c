@@ -28,6 +28,7 @@
 static const char *TAG = "t_touch";
 
 /* ---- Pin map (Leisound V1) ---- */
+#define PIN_I2C_POWER   GPIO_NUM_46
 #define PIN_EN_POWER   GPIO_NUM_43
 #define PIN_I2C_SDA    GPIO_NUM_38
 #define PIN_I2C_SCL    GPIO_NUM_45
@@ -78,14 +79,15 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "===== GT911 Interrupt Mode Test =====");
 
-    /* 1. Power on */
+    /* 1. Power on — AP power (GPIO46) + LCD power (GPIO43) */
     gpio_config_t pwr = {
-        .pin_bit_mask = BIT64(PIN_EN_POWER),
+        .pin_bit_mask = BIT64(PIN_AP_POWER) | BIT64(PIN_EN_POWER),
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&pwr);
-    gpio_set_level(PIN_EN_POWER, 1);
-    ESP_LOGI(TAG, "Power ON");
+    gpio_set_level(PIN_AP_POWER, 1);   /* AP power — GT911 触摸供电 */
+    gpio_set_level(PIN_EN_POWER, 1);   /* LCD power */
+    ESP_LOGI(TAG, "Power ON (AP=46 HIGH, LCD=43 HIGH)");
     vTaskDelay(pdMS_TO_TICKS(100));
 
     /* 2. HW reset — RST+INT shared on GPIO8, INT also on GPIO18 */

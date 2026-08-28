@@ -9,17 +9,18 @@
 #include <string.h>
 
 static const char *TAG = "flash";
+static const char *USER_PARTITION = "nvs_user";
 static bool s_initialized = false;
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
 static esp_err_t open_ns(const char *ns, nvs_open_mode_t mode, nvs_handle_t *h)
 {
-    esp_err_t err = nvs_open(ns, mode, h);
+    esp_err_t err = nvs_open_from_partition(USER_PARTITION, ns, mode, h);
     if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
         ESP_LOGW(TAG, "NVS not init — re-initializing");
         flash_store_init();
-        err = nvs_open(ns, mode, h);
+        err = nvs_open_from_partition(USER_PARTITION, ns, mode, h);
     }
     return err;
 }
@@ -30,11 +31,21 @@ void flash_store_init(void)
 {
     if (s_initialized) return;
 
+    /* The default nvs partition is reserved for factory/system data.
+     * Application settings live exclusively in the separately erasable user
+     * partition. */
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "NVS corrupted, erasing...");
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    err = nvs_flash_init_partition(USER_PARTITION);
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGW(TAG, "User NVS corrupted, erasing...");
+        ESP_ERROR_CHECK(nvs_flash_erase_partition(USER_PARTITION));
+        err = nvs_flash_init_partition(USER_PARTITION);
     }
     ESP_ERROR_CHECK(err);
     s_initialized = true;
@@ -135,7 +146,7 @@ void flash_erase_ns(const char *ns)
 
 void flash_erase_all(void)
 {
-    ESP_LOGI(TAG, "Erasing entire NVS partition...");
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ESP_LOGI(TAG, "NVS erased. Reboot to apply defaults.");
+    ESP_LOGI(TAG, "Erasing user NVS partition...");
+    ESP_ERROR_CHECK(nvs_flash_erase_partition(USER_PARTITION));
+    ESP_LOGI(TAG, "User NVS erased. System NVS preserved.");
 }

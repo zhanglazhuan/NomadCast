@@ -164,8 +164,8 @@ A download task exists in three related places. Understand the split before touc
 | Layer | Where | Role |
 |---|---|---|
 | **In-RAM** | `model->download_tasks[]` (`DownloadTask`) | Runtime source of truth — UI + worker read/write it |
-| **Persistent** | `/sdcard/.podcast/cache/download_tasks/%08d.json` (one file per task, id = filename) | Survives reboot; field-for-field serialization of `DownloadTask` (via `task_to_json`/`task_from_json`) — **metadata only, not audio** |
-| **Audio file** | `/sdcard/.podcast/downloads/<channel>/<episode>.m4a` (`DL_BASE_PATH`) | The actual downloaded audio; managed separately by `local_cache` |
+| **Persistent** | `/sdcard/.nomadcast/cache/download_tasks/%08d.json` (one file per task, id = filename) | Survives reboot; field-for-field serialization of `DownloadTask` (via `task_to_json`/`task_from_json`) — **metadata only, not audio** |
+| **Audio file** | `/sdcard/.nomadcast/downloads/<channel>/<episode>.m4a` (`DL_BASE_PATH`) | The actual downloaded audio; managed separately by `local_cache` |
 
 **Sync rules (keep both copies consistent):**
 - Create: `task_store_create` = grow `download_tasks[]` (realloc) **and** `write_task_file` (JSON), together.

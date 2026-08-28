@@ -1,8 +1,10 @@
 # NomadCast OTA partition table (16 MB flash)
 # Name,   Type, SubType,  Offset,   Size
+# nvs is the factory/system partition; keep the standard label for ESP-IDF
 nvs,      data, nvs,      0x9000,   0x6000
-otadata,  data, ota,      0xF000,   0x2000
-phy_init, data, phy,      0x11000,  0x1000
+nvs_user, data, nvs,      ,         0x6000
+otadata,  data, ota,      ,         0x2000
+phy_init, data, phy,      ,         0x1000
 factory,  app,  factory,  0x20000,  0x500000
 ota_0,    app,  ota_0,    ,         0x500000
 storage,  data, littlefs, ,         0x5E0000

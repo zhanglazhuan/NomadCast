@@ -14,6 +14,8 @@ extern const struct _lv_font_t *g_cjk_font;
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 struct PodcastApp;
 
@@ -149,6 +151,7 @@ typedef struct PodcastModel {
 
     DownloadTask *download_tasks;
     int           download_task_count;
+    SemaphoreHandle_t download_mutex; /* protects task array vs worker */
 
     int     font_size;         /* 0=Small, 1=Medium, 2=Large */
     int     download_quality;  /* 0=Low(64k), 1=Med(128k), 2=High(320k) */
@@ -167,6 +170,8 @@ typedef struct PodcastModel {
 
 void podcast_model_init(struct PodcastApp *app);
 void podcast_model_deinit(struct PodcastApp *app);
+void podcast_model_download_lock(struct PodcastApp *app);
+void podcast_model_download_unlock(struct PodcastApp *app);
 
 /* ── Data import ─────────────────────────────────────────────────────────── */
 
@@ -212,6 +217,7 @@ int  podcast_model_get_current_episode_id(struct PodcastApp *app);
 /* ── Search ──────────────────────────────────────────────────────────────── */
 
 void podcast_model_add_search_history(struct PodcastApp *app, const char *query);
+void podcast_model_clear_search_history(struct PodcastApp *app);
 int  podcast_model_get_search_history_count(struct PodcastApp *app);
 const char *podcast_model_get_search_history_item(struct PodcastApp *app, int index);
 

@@ -35,6 +35,10 @@ typedef void (*input_callback_t)(input_event_t event, void *user_data);
 
 #define INPUT_MAX_CALLBACKS 4
 
+/* 电源键长按阈值 (ms) */
+#define POWER_OFF_LONG_PRESS_MS  2500
+#define POWER_ON_LONG_PRESS_MS    800
+
 /* ========================================================================
  * Public API
  * ======================================================================== */
@@ -43,7 +47,7 @@ typedef void (*input_callback_t)(input_event_t event, void *user_data);
  * @brief Initialize all physical keys and subscribe the primary callback.
  *
  * Uses espressif/button component for debounce + short/long detection.
- * Long-press threshold: 800 ms.
+ * Power-off long-press threshold: 2500 ms.
  *
  * @param cb         Callback invoked on key events (from button task context).
  * @param user_data  Opaque pointer passed to callback.

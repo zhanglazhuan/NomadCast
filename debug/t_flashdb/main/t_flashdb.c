@@ -30,7 +30,7 @@ static const char *TAG = "t_flashdb";
 #define PIN_SD_CMD    GPIO_NUM_14
 #define PIN_SD_DAT0   GPIO_NUM_2
 #define MOUNT_POINT   "/sdcard"
-#define DB_DIR        "/sdcard/.podcast/db"
+#define DB_DIR        "/sdcard/.nomadcast/db"
 
 /* KVDB sizing. File mode stores one file per sector, and init formats EVERY
  * sector once (a header write per sector). So use a LARGE sector to keep the
@@ -68,7 +68,7 @@ static sdmmc_card_t *sd_mount(void)
 static void ensure_db_dir(void)
 {
     struct stat st;
-    if (stat("/sdcard/.podcast", &st) != 0) mkdir("/sdcard/.podcast", 0755);
+    if (stat("/sdcard/.nomadcast", &st) != 0) mkdir("/sdcard/.nomadcast", 0755);
     if (stat(DB_DIR, &st) != 0) mkdir(DB_DIR, 0755);
 }
 
@@ -206,7 +206,7 @@ static void bench_flashdb(int N) {
 /* Baseline: emulate today's system — after each of the first N adds, rewrite the
  * whole JSON file containing k entries (cumulative → O(N^2)). N<=500 only. */
 static void bench_json_baseline(int N) {
-    const char *path = "/sdcard/.podcast/baseline.json";
+    const char *path = "/sdcard/.nomadcast/baseline.json";
     int64_t t0 = esp_timer_get_time();
     for (int k = 1; k <= N; k++) {
         FILE *f = fopen(path, "wb");

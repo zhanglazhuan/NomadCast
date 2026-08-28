@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Ported from Everest ES8156 8051 reference code (ES8156.C) to ESP-IDF
-//
-// Software I2C (bit-banging) variant — uses drivers/sw_i2c, not the hardware
-// I2C master, because the codec shares the GT911 bus whose SCL is on GPIO45
-// (a VDD_SPI strapping pin). See sw_i2c.h.
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "driver/gpio.h"
+#include "driver/i2c_master.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -17,9 +13,8 @@ extern "C" {
 
 /* ---- Config & Handle ---- */
 typedef struct {
-    gpio_num_t scl_pin;      // Software I2C SCL
-    gpio_num_t sda_pin;      // Software I2C SDA
-    uint8_t i2c_address;     // 7-bit I2C address (ES8156 default: 0x08)
+    i2c_master_bus_handle_t i2c_bus;
+    uint8_t i2c_address;    // 7-bit I2C address (ES8156 default: 0x08)
 } es8156_config_t;
 
 typedef struct es8156 *es8156_handle_t;

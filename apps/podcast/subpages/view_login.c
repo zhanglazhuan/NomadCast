@@ -133,7 +133,7 @@ static void on_login_btn_clicked(lv_event_t* e) {
 
     const char* err_msg = NULL;
     bool ok = podcast_controller_login(&g_podcast_app,
-                                      name, pwd, confirm, agreed,
+                                      name, pwd, confirm, ctx->mode == LOGIN_MODE_REGISTER, agreed,
                                       &err_msg);
     if (ok) {
         printf("[INF] %s succeeded\n",
@@ -199,8 +199,9 @@ static lv_obj_t* build_login_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_style_bg_color(page.container, lv_color_hex(0xF5F5F5), 0);
     lv_obj_set_style_pad_all(page.container, 12, 0);
     lv_obj_set_style_pad_row(page.container, 6, 0);
-    lv_obj_set_scroll_dir(page.container, LV_DIR_NONE);
-    lv_obj_set_scrollbar_mode(page.container, LV_SCROLLBAR_MODE_OFF);
+    /* Register 模式字段多、超出视口，允许纵向滚动，否则底部 Login 按钮被截断 */
+    lv_obj_set_scroll_dir(page.container, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(page.container, LV_SCROLLBAR_MODE_AUTO);
 
     LoginFormCtx* ctx = malloc(sizeof(LoginFormCtx));
     memset(ctx, 0, sizeof(LoginFormCtx));

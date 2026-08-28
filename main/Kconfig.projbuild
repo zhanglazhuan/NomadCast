@@ -1,0 +1,15 @@
+menu "NomadCast"
+
+    config NOMADCAST_USB_MSC
+        bool "USB Mass Storage (SD card as USB disk)"
+        default n
+        help
+            Expose the SD card to a PC as a USB mass-storage device
+            (plug USB cable → SD card appears as a removable disk).
+
+            DISABLED for now: the board has no USB VBUS detection circuit,
+            so USB hot-plug cannot be detected reliably. Also, the USB-OTG
+            (TinyUSB) stack disables USB-Serial-JTAG flashing/monitor, so
+            keep this OFF for development builds.
+
+endmenu

@@ -11,12 +11,19 @@
 #include "../model.h"
 #include "../controller.h"
 #include "lv_page.h"
+#include "lv_toast.h"
 
 extern PodcastApp g_podcast_app;
 
 typedef struct {
     lv_obj_t *textarea;
+    lv_obj_t *kb;
+    lv_obj_t *ime;
+    lv_obj_t *cand;
+    lv_obj_t *history;
 } SearchPageCtx;
+
+static SearchPageCtx *g_active_search_ctx = NULL;
 
 static void do_search(const char *query) {
     if (!query || !query[0]) return;
@@ -38,14 +45,77 @@ static void on_history_clicked(lv_event_t *e) {
     if (query) do_search(query);
 }
 
-static void on_focus_timer(lv_timer_t *timer) {
-    lv_obj_t *ta = lv_timer_get_user_data(timer);
-    lv_group_t *g = lv_group_get_default();
-    if (g) lv_group_focus_obj(ta);
+/* ── 键盘显隐:点非键盘区域收起、点搜索栏弹出 ─────────────────────────── */
+
+static bool pt_in_area(const lv_point_t *pt, const lv_area_t *a) {
+    return pt->x >= a->x1 && pt->x <= a->x2 && pt->y >= a->y1 && pt->y <= a->y2;
+}
+
+static void show_keyboard(SearchPageCtx *ctx) {
+    if (!ctx || !ctx->kb || !ctx->textarea) return;
+    lv_obj_clear_flag(ctx->kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_state(ctx->textarea, LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(ctx->kb, ctx->textarea);
+}
+
+static void hide_keyboard(SearchPageCtx *ctx) {
+    if (!ctx || !ctx->kb) return;
+    lv_obj_add_flag(ctx->kb, LV_OBJ_FLAG_HIDDEN);
+    if (ctx->textarea) lv_obj_clear_state(ctx->textarea, LV_STATE_FOCUSED);
+    if (ctx->cand) lv_obj_add_flag(ctx->cand, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void indev_press_filter(lv_event_t *e) {
+    SearchPageCtx *ctx = g_active_search_ctx;
+    if (!ctx || !ctx->kb || !ctx->textarea) return;
+
+    lv_indev_t *indev = lv_event_get_target(e);
+    lv_point_t pt;
+    lv_indev_get_point(indev, &pt);
+
+    bool kb_visible = !lv_obj_has_flag(ctx->kb, LV_OBJ_FLAG_HIDDEN);
+
+    /* 点搜索栏 → 弹出键盘 */
+    lv_area_t ta_area;
+    lv_obj_get_coords(ctx->textarea, &ta_area);
+    if (pt_in_area(&pt, &ta_area)) {
+        if (!kb_visible) show_keyboard(ctx);
+        return;
+    }
+
+    if (!kb_visible) return;   /* 键盘已收起,无事可做 */
+
+    /* 点键盘区域 → 交给键盘自身处理 (左下角是 中/EN,不是收起键) */
+    lv_area_t kb_area;
+    lv_obj_get_coords(ctx->kb, &kb_area);
+    if (pt_in_area(&pt, &kb_area)) return;
+
+    /* 点候选栏 (可见时) → 交给 IME 处理,不收起 */
+    if (ctx->cand && !lv_obj_has_flag(ctx->cand, LV_OBJ_FLAG_HIDDEN)) {
+        lv_area_t cand_area;
+        lv_obj_get_coords(ctx->cand, &cand_area);
+        if (pt_in_area(&pt, &cand_area)) return;
+    }
+
+    /* 其他区域 → 收起键盘 */
+    hide_keyboard(ctx);
+}
+
+/* ── 清空历史 ─────────────────────────────────────────────────────────── */
+
+static void on_clear_history(lv_event_t *e) {
+    SearchPageCtx *ctx = lv_event_get_user_data(e);
+    podcast_model_clear_search_history(&g_podcast_app);
+    if (ctx && ctx->history) lv_obj_clean(ctx->history);
+    lv_toast_show("Search history cleared", 1500);
 }
 
 static void ctx_cleanup_cb(lv_event_t *e) {
     SearchPageCtx *ctx = lv_event_get_user_data(e);
+    /* 摘除 indev 过滤,避免 use-after-free (按回调函数指针匹配) */
+    lv_indev_t *indev = lv_indev_active();
+    if (indev) lv_indev_remove_event_cb_with_user_data(indev, indev_press_filter, NULL);
+    g_active_search_ctx = NULL;
     if (ctx) {
         free(ctx);
         g_podcast_app.view->page_nav.nav_ctx = NULL;
@@ -136,6 +206,7 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     lv_obj_set_style_pad_all(history, 8, 0);
     lv_obj_set_style_pad_row(history, 6, 0);
     lv_obj_set_style_pad_column(history, 6, 0);
+    ctx->history = history;
 
     int hist_count = podcast_model_get_search_history_count(app);
     for (int i = 0; i < hist_count && i < 10; i++) {
@@ -159,6 +230,20 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
 
         lv_obj_add_event_cb(btn, on_history_clicked, LV_EVENT_CLICKED, (void *)item);
     }
+
+    /* 底部「清空历史」按钮 */
+    lv_obj_t *clear_btn = lv_button_create(page.container);
+    lv_obj_set_size(clear_btn, LV_PCT(100), 40);
+    lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0xF5F5F5), 0);
+    lv_obj_set_style_border_width(clear_btn, 0, 0);
+    lv_obj_set_style_radius(clear_btn, 8, 0);
+    lv_obj_add_event_cb(clear_btn, on_clear_history, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *clear_label = lv_label_create(clear_btn);
+    lv_label_set_text(clear_label, "Clear search history");
+    lv_obj_center(clear_label);
+    lv_obj_set_style_text_color(clear_label, lv_color_hex(0x999999), 0);
+    lv_obj_set_style_text_font(clear_label, g_cjk_font, 0);
 
     /* Keyboard (floating, 脱离 flex 布局避免溢出) */
     lv_obj_t *kb = lv_keyboard_create(page.screen);
@@ -187,8 +272,17 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     lv_obj_add_event_cb(kb, on_kb_lang, LV_EVENT_VALUE_CHANGED, ime);
     s_kb_en_mode = false;   /* 每次进页面默认中文 */
 
-    lv_timer_t *focus_timer = lv_timer_create(on_focus_timer, 100, ta);
-    lv_timer_set_repeat_count(focus_timer, 1);
+    ctx->kb   = kb;
+    ctx->ime  = ime;
+    ctx->cand = cand;
+
+    /* 进入页面键盘即显示 → 光标直接激活 (无需 default group) */
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+
+    /* indev 级触摸过滤:点搜索栏弹出键盘、点非键盘区域收起 */
+    g_active_search_ctx = ctx;
+    lv_indev_t *indev = lv_indev_active();
+    if (indev) lv_indev_add_event_cb(indev, indev_press_filter, LV_EVENT_PRESSED, NULL);
 
     return page.screen;
 }

@@ -20,6 +20,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/ota
     ${CMAKE_CURRENT_SOURCE_DIR}/system/audio_player
     ${CMAKE_CURRENT_SOURCE_DIR}/system/wifi
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/settings
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/podcast
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/esp-adf/components
@@ -31,6 +32,19 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/boards/esp32s3)
 
 # Exclude conflicting ADF components (vendor/esp-adf)
 set(EXCLUDE_COMPONENTS audio_board audio_hal display_service esp_peripherals audio_sal)
+
+# Suppress warnings from the vendored ESP-ADF library (third-party code we don't
+# maintain — unused debug helpers, calloc/fabs nits, deprecated IDF driver APIs).
+# Keeps the build log clean without editing vendor files.
+add_compile_options(
+    -Wno-unused-variable
+    -Wno-unused-function
+    -Wno-calloc-transposed-args
+    -Wno-deprecated-declarations
+    -Wno-cpp
+    # C-only: -Wabsolute-value is not a valid flag for the C++ compiler
+    $<$<COMPILE_LANGUAGE:C>:-Wno-absolute-value>
+)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(NomadCast)

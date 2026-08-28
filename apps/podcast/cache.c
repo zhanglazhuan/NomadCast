@@ -3,9 +3,9 @@
  * @brief Unified podcast data cache — API responses, downloads, playback position
  *
  * Directory structure:
- *   .podcast/cache/              — chart.json, lookup.json, artwork/
- *   .podcast/downloads/          — .meta.json (local episodes)
- *   .podcast/playback.json       — per-episode playback position
+ *   .nomadcast/cache/              — chart.json, lookup.json, artwork/
+ *   .nomadcast/downloads/          — .meta.json (local episodes)
+ *   .nomadcast/playback.json       — per-episode playback position
  */
 #include "cache.h"
 #include <stdio.h>
@@ -38,10 +38,10 @@ static const char *T_CACHE = "cache";
 #define CACHE_LOGE(...) fprintf(stderr, __VA_ARGS__)
 #endif
 
-#define CACHE_DIR      "/sdcard/.podcast/cache"
-#define META_FILE      "/sdcard/.podcast/cache/meta.json"
-#define CHART_FILE     "/sdcard/.podcast/cache/chart.json"
-#define LOOKUP_FILE    "/sdcard/.podcast/cache/lookup.json"
+#define CACHE_DIR      "/sdcard/.nomadcast/cache"
+#define META_FILE      "/sdcard/.nomadcast/cache/meta.json"
+#define CHART_FILE     "/sdcard/.nomadcast/cache/chart.json"
+#define LOOKUP_FILE    "/sdcard/.nomadcast/cache/lookup.json"
 
 /* ── per-type state ──────────────────────────────────────────────────────── */
 
@@ -236,7 +236,7 @@ void cache_purge(cache_type_t type) {
 
 /* ── Lookup KV cache ─────────────────────────────────────────────────────── */
 
-#define LOOKUP_KV_FILE "/sdcard/.podcast/cache/lookup_kv.json"
+#define LOOKUP_KV_FILE "/sdcard/.nomadcast/cache/lookup_kv.json"
 
 char *cache_load_lookup_item(int cid, int *out_len) {
     *out_len = 0;
@@ -332,7 +332,7 @@ bool cache_save_lookup_item(int cid, const char *data, int len) {
 
 /* ── Artwork cache ────────────────────────────────────────────────────────── */
 
-#define ARTWORK_DIR "/sdcard/.podcast/cache/artwork"
+#define ARTWORK_DIR "/sdcard/.nomadcast/cache/artwork"
 
 bool cache_artwork_exists(int collection_id) {
     char path[256];
@@ -370,11 +370,11 @@ bool cache_artwork_download(int collection_id, const char *url) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * Playback position store (.podcast/playback.json)
+ * Playback position store (.nomadcast/playback.json)
  * ══════════════════════════════════════════════════════════════════════════ */
 
-#define PB_PATH      "/sdcard/.podcast/playback.json"
-#define PB_TMP       "/sdcard/.podcast/playback.tmp"
+#define PB_PATH      "/sdcard/.nomadcast/playback.json"
+#define PB_TMP       "/sdcard/.nomadcast/playback.tmp"
 #define MAX_PB       512
 
 static PlaybackEntry *g_pb_entries = NULL;
@@ -408,7 +408,7 @@ static int pb_find_or_create(int episode_id, int channel_id) {
 
 void cache_playback_init(struct PodcastApp *app) {
     (void)app;
-    ensure_dir("/sdcard/.podcast/");
+    ensure_dir("/sdcard/.nomadcast/");
 
     FILE *f = fopen(PB_PATH, "rb");
     if (!f) { CACHE_LOGW("[CACHE] No playback.json yet\n"); return; }
@@ -445,7 +445,7 @@ void cache_playback_init(struct PodcastApp *app) {
 }
 
 void cache_playback_save(void) {
-    ensure_dir("/sdcard/.podcast/");
+    ensure_dir("/sdcard/.nomadcast/");
 
     FILE *f = fopen(PB_TMP, "wb");
     if (!f) return;
@@ -477,6 +477,13 @@ bool cache_playback_is_completed(int episode_id) {
 int cache_playback_get_position(int episode_id) {
     PlaybackEntry *e = cache_playback_get(episode_id);
     return e ? e->position_sec : 0;
+}
+
+int cache_playback_total_sec(void) {
+    int total = 0;
+    for (int i = 0; i < g_pb_count; i++)
+        total += g_pb_entries[i].position_sec;
+    return total;
 }
 
 void cache_playback_set_position(int episode_id, int channel_id,
