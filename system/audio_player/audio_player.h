@@ -36,6 +36,9 @@ int audio_player_get_volume(void);
 /** Current playback position in seconds (wall-clock, pause-aware; 0 when idle). */
 int audio_player_get_position_sec(void);
 
+/** Process decoder events and synchronize the I2S format. Call from main loop. */
+void audio_player_process(void);
+
 /** Start streaming from URL. Non-blocking — runs in a FreeRTOS task. */
 bool audio_player_play(const char *url);
 

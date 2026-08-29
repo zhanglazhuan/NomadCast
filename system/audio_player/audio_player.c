@@ -3,7 +3,7 @@
  *
  * Pipeline:  reader (fatfs or http) → esp_decoder → softvol → i2s_stream
  *
- * Volume:    ES8156 I2C register (headphone) + software PCM scale (ES7111 speaker)
+ * Volume:    ES8156 I2C register (headphone) + software PCM scale
  *
  * Lifecycle: play()  = build → run
  *            stop()  = stop → deinit
@@ -25,6 +25,7 @@
 
 #include "audio_pipeline.h"
 #include "audio_element.h"
+#include "audio_event_iface.h"
 #include "audio_common.h"
 #include "http_stream.h"
 #include "fatfs_stream.h"
@@ -82,6 +83,7 @@ typedef struct {
     audio_pipeline_handle_t pipeline;
     audio_element_handle_t i2s;
     audio_element_handle_t softvol;
+    audio_event_iface_handle_t events;
     es8156_handle_t codec;
     bool initialized;
     bool playing;
@@ -262,9 +264,25 @@ static bool pipeline_build(void)
         ESP_LOGE(TAG, "pipeline link failed"); goto fail;
     }
 
+    /* The decoder only knows the stream format after parsing its header.
+     * Keep a listener attached so the main loop can apply that format to I2S. */
+    audio_event_iface_cfg_t event_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();
+    s_player.events = audio_event_iface_init(&event_cfg);
+    if (!s_player.events) {
+        ESP_LOGE(TAG, "audio event interface init failed"); goto fail;
+    }
+    if (audio_pipeline_set_listener(s_player.pipeline, s_player.events) != ESP_OK) {
+        ESP_LOGE(TAG, "pipeline listener setup failed"); goto fail;
+    }
+
     return true;
 
 fail:
+    if (s_player.events) {
+        if (s_player.pipeline) audio_pipeline_remove_listener(s_player.pipeline);
+        audio_event_iface_destroy(s_player.events);
+        s_player.events = NULL;
+    }
     if (s_player.pipeline) { audio_pipeline_deinit(s_player.pipeline); s_player.pipeline = NULL; }
     s_player.i2s    = NULL;
     s_player.softvol = NULL;
@@ -276,6 +294,13 @@ static void pipeline_teardown(void)
     if (s_player.pipeline) {
         audio_pipeline_stop(s_player.pipeline);
         audio_pipeline_wait_for_stop(s_player.pipeline);
+        if (s_player.events) audio_pipeline_remove_listener(s_player.pipeline);
+    }
+    if (s_player.events) {
+        audio_event_iface_destroy(s_player.events);
+        s_player.events = NULL;
+    }
+    if (s_player.pipeline) {
         audio_pipeline_deinit(s_player.pipeline);
         s_player.pipeline = NULL;
     }
@@ -437,6 +462,38 @@ static void capture_position(void) {
 
 /* ── Public API ──────────────────────────────────────────────────────── */
 
+void audio_player_process(void)
+{
+    if (!s_player.events || !s_player.pipeline) return;
+
+    audio_event_iface_msg_t message;
+    while (audio_event_iface_listen(s_player.events, &message, 0) == ESP_OK) {
+        audio_element_handle_t decoder =
+            audio_pipeline_get_el_by_tag(s_player.pipeline, "decoder");
+        if (message.source_type != AUDIO_ELEMENT_TYPE_ELEMENT ||
+            message.source != (void *)decoder ||
+            message.cmd != AEL_MSG_CMD_REPORT_MUSIC_INFO) {
+            continue;
+        }
+
+        audio_element_info_t info = {0};
+        esp_err_t err = audio_element_getinfo(decoder, &info);
+        if (err == ESP_OK) audio_element_setinfo(s_player.i2s, &info);
+        if (err == ESP_OK) {
+            err = i2s_stream_set_clk(s_player.i2s, info.sample_rates,
+                                     info.bits, info.channels);
+        }
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "I2S synced: %d Hz, %d bit, %d ch",
+                     info.sample_rates, info.bits, info.channels);
+        } else {
+            ESP_LOGE(TAG, "I2S sync failed: %s (%d Hz, %d bit, %d ch)",
+                     esp_err_to_name(err), info.sample_rates,
+                     info.bits, info.channels);
+        }
+    }
+}
+
 bool audio_player_play(const char *url) {
     if (!url || !url[0]) return false;
 
@@ -577,7 +634,6 @@ void audio_player_set_volume(int vol) {
         s_player.speaker_volume = vol;
         flash_set_i32("settings", "volume_speaker", vol);
     }
-
     /* HT6872 speaker gain is substantially higher than the headphone path.
      * Keep the DAC input attenuated on speaker output to prevent the amp from
      * clipping; headphones retain the full user range. */

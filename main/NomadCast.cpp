@@ -689,6 +689,7 @@ static void main_event_loop(void)
     while (1) {
         app_event_process();
         controller_process_download();
+        audio_player_process();
 
         uint32_t delay = lv_timer_handler();
         vTaskDelay(delay > 0 ? pdMS_TO_TICKS(delay) : 1);
