@@ -1,0 +1,4 @@
+# t_earphone2 — FATFS Kconfig 兼容 (ESP-IDF v5.5.3 默认配置可能漏定义)
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_USE_LABEL=y

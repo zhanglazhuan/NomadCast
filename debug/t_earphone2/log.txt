@@ -1,0 +1,152 @@
+
+Leaving...
+Hard resetting via RTS pin...
+Executing action: monitor
+Running idf_monitor in directory D:\Codes\NomadCast\debug\t_earphone2
+Executing "C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe C:\Espressif\frameworks\esp-idf-v5.5.3\tools/idf_monitor.py -p COM7 -b 115200 --toolchain-prefix xtensa-esp32s3-elf- --target esp32s3 --revision 0 D:\Codes\NomadCast\debug\t_earphone2\build\t_earphone2.elf D:\Codes\NomadCast\debug\t_earphone2\build\bootloader\bootloader.elf --force-color -m 'C:\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe' 'C:\Espressif\frameworks\esp-idf-v5.5.3\tools\idf.py'"...
+--- Warning: GDB cannot open serial ports accessed as COMx
+--- Using \\.\COM7 instead...
+--- esp-idf-monitor 1.9.0 on \\.\COM7 115200
+--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x28 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x403780c6
+--- 0x403780c6: esp_cpu_wait_for_intr at C:/Espressif/frameworks/esp-idf-v5.5.3/components/esp_hw_support/cpu.c:64
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x14f0
+load:0x403c8700,len:0xd24
+--- 0x403c8700: _stext at ??:?
+load:0x403cb700,len:0x2ef0
+entry 0x403c8924
+--- 0x403c8924: call_start_cpu0 at C:/Espressif/frameworks/esp-idf-v5.5.3/components/bootloader/subproject/main/bootloader_start.c:27
+I (24) boot: ESP-IDF v5.5.3-dirty 2nd stage bootloader
+I (24) boot: compile time Jul  3 2026 16:32:53
+I (25) boot: Multicore bootloader
+I (25) boot: chip revision: v0.2
+I (28) boot: efuse block revision: v1.3
+I (32) boot.esp32s3: Boot SPI Speed : 80MHz
+I (36) boot.esp32s3: SPI Mode       : DIO
+I (39) boot.esp32s3: SPI Flash Size : 2MB
+I (43) boot: Enabling RNG early entropy source...
+I (48) boot: Partition Table:
+I (50) boot: ## Label            Usage          Type ST Offset   Length
+I (56) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (63) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (70) boot:  2 factory          factory app      00 00 00010000 00100000
+I (76) boot: End of partition table
+I (79) esp_image: segment 0: paddr=00010020 vaddr=3c020020 size=0d920h ( 55584) map
+I (97) esp_image: segment 1: paddr=0001d948 vaddr=3fc93300 size=026d0h (  9936) load
+I (99) esp_image: segment 2: paddr=00020020 vaddr=42000020 size=1e5c8h (124360) map
+I (123) esp_image: segment 3: paddr=0003e5f0 vaddr=3fc959d0 size=00894h (  2196) load
+I (124) esp_image: segment 4: paddr=0003ee8c vaddr=40374000 size=0f2d0h ( 62160) load
+I (141) esp_image: segment 5: paddr=0004e164 vaddr=50000000 size=00020h (    32) load
+I (147) boot: Loaded app from partition at offset 0x10000
+I (147) boot: Disabling RNG early entropy source...
+I (159) cpu_start: Multicore app
+I (167) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (168) cpu_start: Pro cpu start user code
+I (168) cpu_start: cpu freq: 160000000 Hz
+I (169) app_init: Application information:
+I (173) app_init: Project name:     t_earphone2
+I (177) app_init: App version:      1
+I (181) app_init: Compile time:     Jul  3 2026 16:32:44
+I (186) app_init: ELF file SHA256:  6a446d47f...
+I (190) app_init: ESP-IDF:          v5.5.3-dirty
+I (194) efuse_init: Min chip rev:     v0.0
+I (198) efuse_init: Max chip rev:     v0.99
+I (202) efuse_init: Chip rev:         v0.2
+I (206) heap_init: Initializing. RAM available for dynamic allocation:
+I (213) heap_init: At 3FC96B78 len 00052B98 (330 KiB): RAM
+I (218) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (223) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (228) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (234) spi_flash: detected chip: generic
+I (237) spi_flash: flash io: dio
+W (240) spi_flash: Detected size(16384k) larger than the size in the binary image header(2048k). Using the size in the binary image header.
+I (252) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (259) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (265) main_task: Started on CPU0
+I (275) main_task: Calling app_main()
+I (275) diag: === ES8156 Diagnostic ===
+I (1275) diag: AMP_EN(43) driven HIGH for headphone path
+I (1275) diag: === I2C Bus Scan (0x01-0x7F) ===
+I (1275) diag:   [0x08] ChipID=0x81FF
+I (1295) diag: Total devices: 1
+I (1295) ES8156: Initialized at I2C addr 0x08
+I (1295) diag: ES8156 Chip ID: 0x8155
+I (1295) diag: === ES8156 Registers BEFORE config ===
+I (1305) diag:   [0x00] = 0x1C
+I (1305) diag:   [0x01] = 0x20
+I (1305) diag:   [0x03] = 0x01
+I (1315) diag:   [0x05] = 0x04
+I (1315) diag:   [0x06] = 0x11
+I (1315) diag:   [0x08] = 0x06
+I (1315) diag:   [0x0A] = 0x50
+I (1325) diag:   [0x0B] = 0x50
+I (1325) diag:   [0x0D] = 0x10
+I (1325) diag:   [0x10] = 0x40
+I (1335) diag:   [0x12] = 0x04
+I (1335) diag:   [0x13] = 0x11
+I (1335) diag:   [0x14] = 0xBF
+I (1335) diag:   [0x17] = 0xF7
+I (1345) diag:   [0x19] = 0x20
+I (1345) diag:   [0x20] = 0x16
+I (1345) diag:   [0x21] = 0x7F
+I (1345) diag:   [0x23] = 0x86
+I (1355) diag:   [0x25] = 0x07
+I (1355) diag:   ChipID=0x1155 Ver=0x11
+I (1355) ES8156: Configure DAC (headphone mode, main2 ref DACHPModeOn=1)
+I (1365) ES8156: DAC configured (headphone mode)
+I (1365) diag: === ES8156 Registers AFTER config ===
+I (1375) diag:   [0x00] = 0x03
+I (1375) diag:   [0x01] = 0x21
+I (1375) diag:   [0x02] = 0x04
+I (1385) diag:   [0x03] = 0x01
+I (1385) diag:   [0x05] = 0x04
+I (1385) diag:   [0x06] = 0x11
+I (1395) diag:   [0x08] = 0x3F
+I (1395) diag:   [0x0A] = 0x01
+I (1395) diag:   [0x0B] = 0x01
+I (1395) diag:   [0x0D] = 0x14
+I (1405) diag:   [0x10] = 0x40
+I (1405) diag:   [0x11] = 0x31
+I (1405) diag:   [0x14] = 0xBF
+I (1415) diag:   [0x17] = 0xF7
+I (1415) diag:   [0x19] = 0x20
+I (1415) diag:   [0x20] = 0x16
+I (1415) diag:   [0x21] = 0x3F
+I (1425) diag:   [0x22] = 0x0A
+I (1425) diag:   [0x23] = 0xCA
+I (1425) diag:   [0x24] = 0x01
+I (1425) diag:   [0x25] = 0x20
+I (1435) diag:   ChipID=0x1155 Ver=0x11
+I (1445) diag: I2S enabled, MCLK output on IO4, silence preloaded
+I (1445) diag: === MCLK Check (PCNT on IO4) ===
+I (1545) diag: MCLK OK! PCNT=9741 (~0.1 MHz)
+I (1545) diag: === ES8156 Registers AFTER playback ===
+I (1545) diag:   [0x00] = 0x03
+I (1545) diag:   [0x01] = 0x21
+I (1545) diag:   [0x02] = 0x04
+I (1545) diag:   [0x03] = 0x01
+I (1545) diag:   [0x05] = 0x04
+I (1555) diag:   [0x06] = 0x11
+I (1555) diag:   [0x08] = 0x3F
+I (1555) diag:   [0x0A] = 0x01
+I (1565) diag:   [0x0B] = 0x01
+I (1565) diag:   [0x0C] = 0x60
+I (1565) diag:   [0x0D] = 0x14
+I (1565) diag:   [0x10] = 0x40
+I (1575) diag:   [0x11] = 0x31
+I (1575) diag:   [0x14] = 0xBF
+I (1575) diag:   [0x17] = 0xF7
+I (1585) diag:   [0x19] = 0x20
+I (1585) diag:   [0x20] = 0x16
+I (1585) diag:   [0x21] = 0x3F
+I (1585) diag:   [0x22] = 0x0A
+I (1595) diag:   [0x23] = 0xCA
+I (1595) diag:   [0x24] = 0x01
+I (1595) diag:   [0x25] = 0x20
+I (1595) diag:   ChipID=0x1155 Ver=0x11
+I (1605) diag: === Diagnostic Complete ===
