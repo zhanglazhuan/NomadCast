@@ -33,6 +33,20 @@ Key sdkconfig settings (in `sdkconfig.defaults`):
 
 **GCC ICE workaround**: if `esp_lcd_panel_rgb.c` crashes the compiler, set `IDF_CCACHE_ENABLE=0` and rebuild clean.
 
+**exFAT SD card support (manual IDF patch)**: ESP-IDF ships with FatFs exFAT disabled
+(`FF_FS_EXFAT 0` — there is no Kconfig/menuconfig option, due to Microsoft licensing).
+To read exFAT SD cards, edit `$IDF_PATH/components/fatfs/src/ffconf.h` and set
+`FF_FS_EXFAT 1` **and** `FF_LBA64 1`, then rebuild. This patch lives in the IDF install
+(not this repo), so it must be re-applied after reinstalling/upgrading ESP-IDF.
+Applied 2026-09-04; local IDF is `/Users/chenhui/Work/project2026/esp/esp-idf` (v5.3.5).
+
+**ADF audio task PSRAM stack (vendored patch)**: ADF's `audio_thread.c` places task stacks in
+PSRAM via `xTaskCreateRestrictedPinnedToCore()`, an MPU-restricted API that ESP-IDF v5 removed.
+`vendor/esp-adf/components/audio_sal/audio_thread.c` is patched to use
+`xTaskCreatePinnedToCoreWithCaps(..., MALLOC_CAP_SPIRAM)` instead. Without this the decoder /
+softvol / i2s element tasks fail to create (`Not found right xTaskCreateRestrictedPinnedToCore`)
+and local playback hangs. Re-apply if `vendor/esp-adf` is re-synced upstream.
+
 ## Directory Structure
 
 ```
@@ -55,7 +69,7 @@ NomadCast/
 │       ├── view.c/.h          # Full view layer (not compiled)
 │       └── subpages/         # Full subpages (not compiled)
 │
-├── sys/                      # System modules (ESP-IDF components)
+├── system/                      # System modules (ESP-IDF components)
 │   ├── uilv/                 # Shared LVGL layer
 │   │   ├── framework/        # page_navigator (push/pop navigation stack)
 │   │   ├── widgets/          # lv_page, lv_status_bar, lv_toast, lv_bottom_sheet, lv_num_input
@@ -83,7 +97,7 @@ NomadCast/
 │   ├── gt911/                # GT911 touch controller (software I2C)
 │   └── sw_i2c/               # Shared software bit-bang I2C (SDA=38 / SCL=45)
 │
-├── board/
+├── boards/
 │   ├── nomadcast_v1.h        # Pin definitions (single source of truth, NOMADCAST_*)
 │   └── leisound_v1.h         # Deprecated shim → nomadcast_v1.h (LEISOUND_* aliases)
 │

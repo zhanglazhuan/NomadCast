@@ -28,7 +28,7 @@
 static const char *TAG = "log_upload";
 
 #define LOG_BASE_PATH       "/sdcard/.nomadcast/logs"
-#define PODCAST_SERVER      "http://192.168.137.1:5000"
+#define PODCAST_SERVER      "http://192.168.1.88:5088"
 #define UPLOAD_URL          PODCAST_SERVER "/api/logs/chunk"
 #define UPLOAD_CHUNK_BYTES  4096
 #define MAX_RETRIES         3

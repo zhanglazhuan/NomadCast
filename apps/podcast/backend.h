@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /* Podcast proxy server — change this to the production cloud IP */
-#define PODCAST_SERVER  "http://192.168.137.1:5000"
+#define PODCAST_SERVER  "http://192.168.1.88:5088"
 
 #define BK_MAX_TITLE    256
 #define BK_MAX_ARTIST   128

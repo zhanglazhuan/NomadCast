@@ -33,7 +33,7 @@ static lv_obj_t* build_about_page(struct SettingsApp *app, void *user_data)
     } items[] = {
         {"Device Name",  "NomadCast"},
         {"Device ID",    dev_id},
-        {"Firmware Ver", "0.1.0"},
+        {"Firmware Ver", "0.1.1"},
         {"SDK",          "ESP-IDF v5.5.3"},
         {"Hardware",     "Leisound V1 (ESP32-S3)"},
         {"LVGL",         "v9.5"},

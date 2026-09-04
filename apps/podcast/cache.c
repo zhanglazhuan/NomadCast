@@ -356,7 +356,7 @@ bool cache_artwork_download(int collection_id, const char *url) {
     /* Artwork is an image → use /api/raw (raw byte passthrough). /api/play
      * transcodes its input as audio and returns an empty body for images. */
     char proxy_url[1536];
-    snprintf(proxy_url, sizeof(proxy_url), "http://192.168.137.1:5000/api/raw?url=%s", url);
+    snprintf(proxy_url, sizeof(proxy_url), "http://192.168.1.88:5088/api/raw?url=%s", url);
     bool ok = http_download_to_file(proxy_url, path, NULL);
     if (ok) {
         CACHE_LOGI("[CACHE] Artwork saved: %s", path);

@@ -2,6 +2,8 @@
  * NomadCast — Key Input (espressif/button v4.x)
  */
 
+#include <string.h>
+
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "iot_button.h"

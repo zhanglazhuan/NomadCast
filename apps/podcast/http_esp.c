@@ -314,9 +314,16 @@ bool http_download_to_file(const char *url, const char *file_path,
                 if (n <= 0) break;
                 if (first_chunk) {
                     ESP_LOGI(TAG, "dl: streaming started");
-                    first_chunk = false;
                 }
                 if (fwrite(buf, 1, n, f) != (size_t)n) { aborted = true; break; }
+                if (first_chunk) {
+                    /* Marker placed AFTER the first SD write: if the log ends at
+                     * "streaming started" without this line, the transfer is
+                     * blocked in fwrite (SD/exFAT write) — not in the network
+                     * read (which has a 120 s transport timeout). */
+                    ESP_LOGI(TAG, "dl: first chunk written (%d bytes)", n);
+                    first_chunk = false;
+                }
                 total     += n;
                 win_bytes += n;
                 /* Briefly yield every ~192KB so SPI LCD can grab the
@@ -346,7 +353,7 @@ bool http_download_to_file(const char *url, const char *file_path,
                 }
 
                 if (total - last_log >= 256 * 1024) {
-                    ESP_LOGD(TAG, "dl: %d KB", total / 1024);
+                    ESP_LOGI(TAG, "dl: %d KB", total / 1024);
                     last_log = total;
                 }
             }

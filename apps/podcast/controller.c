@@ -719,12 +719,6 @@ static void dl_worker_task(void *arg)
                 audio_player_release();
                 vTaskDelay(pdMS_TO_TICKS(300));
             }
-            if (audio_player_is_active() && audio_player_is_local_source()) {
-                /* Local M4A cannot be safely reconstructed from an arbitrary
-                 * compressed byte offset; keep its decoder alive and defer
-                 * downloads until playback is stopped. */
-                break;
-            }
 
             /* User-requested pause — wait for resume signal */
             if (ctx->dl.user_paused) {
@@ -735,6 +729,16 @@ static void dl_worker_task(void *arg)
             int task_id = dl_take_next_pending(app, s_url, sizeof(s_url),
                                                      s_path, sizeof(s_path));
             if (task_id < 0) break;   /* nothing pending */
+
+            /* A paused local M4A keeps its decoder alive for in-place resume, but
+             * that holds DRAM the download needs. Now that a task is queued,
+             * release the paused pipeline (position is saved) so the download can
+             * proceed; a later resume rebuilds and re-seeks from that offset. */
+            if (audio_player_is_active() && audio_player_is_local_source()) {
+                ESP_LOGI(TAG, "dl: releasing paused local audio to download");
+                audio_player_release();
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
 
             audio_player_log_memory("before-download");
             ESP_LOGI(TAG, "dl: downloading task %d → %s", task_id, s_path);

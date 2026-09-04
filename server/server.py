@@ -5,7 +5,7 @@
 
 启动方式:
     python server.py
-    # 服务运行在 http://0.0.0.0:5000
+    # 服务运行在 http://0.0.0.0:5088
 """
 import os
 import datetime
@@ -783,6 +783,6 @@ if __name__ == "__main__":
     print("  Leisound Podcast 聚合服务 v0.2.0")
     print(f"  下载目录: {DOWNLOAD_DIR}")
     print(f"  固件目录: {FIRMWARE_DIR}")
-    print("  地址: http://127.0.0.1:5000")
+    print("  地址: http://127.0.0.1:5088")
     print("=" * 50)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5088, debug=True)

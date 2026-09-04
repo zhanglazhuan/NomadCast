@@ -55,7 +55,7 @@ NomadCast/
 │       ├── view.c/.h          # Full view layer (not compiled)
 │       └── subpages/         # Full subpages (not compiled)
 │
-├── sys/                      # System modules (ESP-IDF components)
+├── system/                      # System modules (ESP-IDF components)
 │   ├── uilv/                 # Shared LVGL layer
 │   │   ├── framework/        # page_navigator (push/pop navigation stack)
 │   │   ├── widgets/          # lv_page, lv_status_bar, lv_toast, lv_bottom_sheet, lv_num_input
@@ -83,7 +83,7 @@ NomadCast/
 │   ├── gt911/                # GT911 touch controller (software I2C)
 │   └── sw_i2c/               # Shared software bit-bang I2C (SDA=38 / SCL=45)
 │
-├── board/
+├── boards/
 │   ├── nomadcast_v1.h        # Pin definitions (single source of truth, NOMADCAST_*)
 │   └── leisound_v1.h         # Deprecated shim → nomadcast_v1.h (LEISOUND_* aliases)
 │

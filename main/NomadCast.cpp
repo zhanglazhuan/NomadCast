@@ -94,7 +94,6 @@ static esp_lcd_panel_handle_t display_init(void)
         .sclk_io_num = PIN_SPI_SCK, .quadwp_io_num = -1, .quadhd_io_num = -1,
         .data4_io_num = -1, .data5_io_num = -1,
         .data6_io_num = -1, .data7_io_num = -1,
-        .data_io_default_level = 0,
         .max_transfer_sz = LCD_W * 20 * 2,  /* match flush buffer height */
         .flags = 0, .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO, .intr_flags = 0,
     };
@@ -105,7 +104,7 @@ static esp_lcd_panel_handle_t display_init(void)
         .spi_mode = 0, .pclk_hz = SPI_FREQ_HZ, .trans_queue_depth = 10,
         .on_color_trans_done = NULL, .user_ctx = NULL,
         .lcd_cmd_bits = 8, .lcd_param_bits = 8,
-        .cs_ena_pretrans = 0, .cs_ena_posttrans = 0, .flags = {},
+        .flags = {},
     };
     esp_lcd_panel_io_handle_t io = NULL;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI_HOST_ID, &io_cfg, &io));
