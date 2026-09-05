@@ -72,6 +72,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&e->ip_info.ip));
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            ESP_LOGI(TAG, "RSSI=%d dBm (channel %d)", ap.rssi, ap.primary);
+        }
+        /* Re-assert no-modem-sleep AFTER the association completes: the driver
+         * can reset PS back to WIFI_PS_MIN_MODEM during connect, and MIN_MODEM
+         * collapses TCP download throughput to ~16 KB/s. */
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        wifi_ps_type_t ps = WIFI_PS_MAX_MODEM;
+        esp_wifi_get_ps(&ps);
+        ESP_LOGI(TAG, "PS mode after connect: %d (0=NONE,1=MIN_MODEM,2=MAX_MODEM)",
+                 (int)ps);
         s_disconnect_reason = 0;
         app_event_fire(APP_EVENT_WIFI_CONNECTED, NULL);
         xEventGroupSetBits(s_wifi_evt, WIFI_CONNECTED_BIT);
@@ -120,6 +132,10 @@ bool hal_wifi_init(void)
 
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_start();
+    /* Disable modem sleep (default WIFI_PS_MIN_MODEM sleeps the radio between
+     * DTIM beacons, collapsing TCP download throughput to ~16 KB/s). Keep the
+     * modem awake for the streaming/download path. */
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     s_wifi_evt = xEventGroupCreate();
     s_wifi_initialized = true;

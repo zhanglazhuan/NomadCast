@@ -20,9 +20,14 @@ CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # Comprehensive poisoning validates block head+tail on every free() and reports
 # the exact overflow length + caller. Keep during bring-up; drop for release.
 CONFIG_HEAP_POISONING_COMPREHENSIVE=y
-CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=n
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
 CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=n
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+# Larger TCP receive window — the lwIP default (5760) caps download throughput
+# at ~50 KB/s on this WiFi link (window/RTT). 65535 is the no-scaling ceiling;
+# the PS-mode fix (hal_esp.c) is the real throughput win, this adds headroom.
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_FATFS_API_ENCODING_UTF_8=y

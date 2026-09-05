@@ -36,9 +36,14 @@ void http_client_deinit(void) { /* no-op */ }
 
 char *http_get_sync(const char *url, int *out_status, int *out_len)
 {
+    return http_get_sync_timeout(url, out_status, out_len, 15000);
+}
+
+char *http_get_sync_timeout(const char *url, int *out_status, int *out_len, int timeout_ms)
+{
     esp_http_client_config_t cfg = {
         .url = url,
-        .timeout_ms = 15000,
+        .timeout_ms = timeout_ms,
         .buffer_size = 4096,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .max_redirection_count = 10,
@@ -306,16 +311,22 @@ bool http_download_to_file(const char *url, const char *file_path,
         int total = (int)base_offset, last_log = total;
         bool first_chunk = true;
         bool aborted = false;
+        int64_t read_us = 0, write_us = 0;   /* diagnostic: network vs SD split */
         int64_t win_start_us = esp_timer_get_time();  /* speed-window start */
         int     win_bytes    = 0;                      /* bytes since window start */
         if (buf) {
             while (1) {
+                int64_t t0 = esp_timer_get_time();
                 int n = esp_http_client_read(client, buf, 8192);
+                read_us += esp_timer_get_time() - t0;
                 if (n <= 0) break;
                 if (first_chunk) {
                     ESP_LOGI(TAG, "dl: streaming started");
                 }
-                if (fwrite(buf, 1, n, f) != (size_t)n) { aborted = true; break; }
+                t0 = esp_timer_get_time();
+                bool wok = (fwrite(buf, 1, n, f) == (size_t)n);
+                write_us += esp_timer_get_time() - t0;
+                if (!wok) { aborted = true; break; }
                 if (first_chunk) {
                     /* Marker placed AFTER the first SD write: if the log ends at
                      * "streaming started" without this line, the transfer is
@@ -353,7 +364,8 @@ bool http_download_to_file(const char *url, const char *file_path,
                 }
 
                 if (total - last_log >= 256 * 1024) {
-                    ESP_LOGI(TAG, "dl: %d KB", total / 1024);
+                    ESP_LOGI(TAG, "dl: %d KB (read %lldms / write %lldms)", total / 1024,
+                             (long long)(read_us / 1000), (long long)(write_us / 1000));
                     last_log = total;
                 }
             }

@@ -19,6 +19,13 @@
 
 static const char *TAG = "task_store";
 
+/* Before SNTP sync, time(NULL) returns RTC uptime (a tiny value, e.g. < 1e6 s),
+ * NOT real epoch time.  A task created while the clock was unsynced stores that
+ * bogus value in created_at; on the next boot (clock now synced) it would be
+ * mistaken for "expired 3 days ago" and dropped.  Guard TTL filtering so any
+ * created_at below this floor is treated as "clock was unsynced" and kept. */
+static const time_t TIME_FLOOR = 1000000000;   /* ~2001, far below any real date */
+
 /* Ensure the directory exists (mkdir -p). */
 static void ensure_dir(void) {
     struct stat st;
@@ -171,7 +178,8 @@ int task_store_load(struct PodcastApp *app) {
         char line[2048];
         if (fgets(line, sizeof(line), f)) {
             DownloadTask tmp;
-            if (task_from_json(line, &tmp) && tmp.created_at >= cutoff)
+            if (task_from_json(line, &tmp) &&
+                (tmp.created_at >= cutoff || tmp.created_at < TIME_FLOOR))
                 count++;
         }
         fclose(f);
@@ -196,7 +204,8 @@ int task_store_load(struct PodcastApp *app) {
         char line[2048];
         if (fgets(line, sizeof(line), f)) {
             DownloadTask tmp;
-            if (task_from_json(line, &tmp) && tmp.created_at >= cutoff) {
+            if (task_from_json(line, &tmp) &&
+                (tmp.created_at >= cutoff || tmp.created_at < TIME_FLOOR)) {
                 m->download_tasks[m->download_task_count++] = tmp;
             }
         }
@@ -316,7 +325,8 @@ void task_store_purge_old(void) {
         bool expired = false;
         if (fgets(line, sizeof(line), f)) {
             DownloadTask tmp;
-            if (task_from_json(line, &tmp) && tmp.created_at < cutoff)
+            if (task_from_json(line, &tmp) &&
+                tmp.created_at < cutoff && tmp.created_at >= TIME_FLOOR)
                 expired = true;
         }
         fclose(f);

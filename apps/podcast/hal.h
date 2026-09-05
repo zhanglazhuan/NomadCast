@@ -15,6 +15,7 @@ int  hal_wifi_get_disconnect_reason(void);
 void http_client_init(void);
 void http_client_deinit(void);
 char *http_get_sync(const char *url, int *status, int *len);
+char *http_get_sync_timeout(const char *url, int *status, int *len, int timeout_ms);
 char *http_post_json_sync(const char *url, const char *json_body, int *status, int *len);
 void http_free_response_body(void *body);
 const char *http_last_error(void);  /* human-readable detail after http_get_sync returns NULL */

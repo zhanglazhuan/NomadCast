@@ -29,6 +29,7 @@
 #include "i_http_client.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "ff.h"      /* FatFS f_getfree — SD-mount check */
 #include "cJSON.h"
 
@@ -41,6 +42,11 @@ static const char *TAG = "podcast_ctrl";
 
 #define DL_DONE_RING         32
 #define RSS_BLACKLIST_MAX     32
+/* How long a channel stays blacklisted after a failed RSS fetch.  A transient
+ * failure (one slow fetch, a brief server hiccup) must not permanently hide a
+ * channel for the rest of the boot session — after this cooldown the next tap
+ * retries the fetch. */
+#define RSS_BLACKLIST_TTL_US  (60 * 1000000LL)
 
 /* ── Download worker state ──────────────────────────────────────────── */
 typedef struct {
@@ -72,6 +78,7 @@ typedef struct PodcastCtrlCtx {
     int        feed_offset;          /* pagination offset (0-indexed) */
     int        feed_limit;           /* pagination page size */
     int        rss_blacklist[RSS_BLACKLIST_MAX];
+    int64_t    rss_blacklist_at[RSS_BLACKLIST_MAX];  /* esp_timer_get_time() when blacklisted */
     int        rss_blacklist_count;
     SemaphoreHandle_t rss_sem;
     TaskHandle_t rss_task;
@@ -151,15 +158,30 @@ static channel_category_t map_genre(const char *genre)
 /* ── RSS fetch bridge ────────────────────────────────────────────────── */
 
 static bool rss_is_blacklisted(PodcastCtrlCtx *ctx, int channel_id) {
-    for (int i = 0; i < ctx->rss_blacklist_count; i++)
-        if (ctx->rss_blacklist[i] == channel_id) return true;
+    for (int i = 0; i < ctx->rss_blacklist_count; i++) {
+        if (ctx->rss_blacklist[i] != channel_id) continue;
+        if (esp_timer_get_time() - ctx->rss_blacklist_at[i] < RSS_BLACKLIST_TTL_US)
+            return true;
+        /* Cooldown expired — drop the stale entry so the next tap retries. */
+        ctx->rss_blacklist[i]     = ctx->rss_blacklist[ctx->rss_blacklist_count - 1];
+        ctx->rss_blacklist_at[i]  = ctx->rss_blacklist_at[ctx->rss_blacklist_count - 1];
+        ctx->rss_blacklist_count--;
+        return false;
+    }
     return false;
 }
 
 static void rss_blacklist_add(PodcastCtrlCtx *ctx, int channel_id) {
-    if (rss_is_blacklisted(ctx, channel_id)) return;
+    for (int i = 0; i < ctx->rss_blacklist_count; i++) {
+        if (ctx->rss_blacklist[i] == channel_id) {
+            ctx->rss_blacklist_at[i] = esp_timer_get_time();  /* refresh cooldown */
+            return;
+        }
+    }
     if (ctx->rss_blacklist_count >= RSS_BLACKLIST_MAX) return;
-    ctx->rss_blacklist[ctx->rss_blacklist_count++] = channel_id;
+    ctx->rss_blacklist[ctx->rss_blacklist_count]     = channel_id;
+    ctx->rss_blacklist_at[ctx->rss_blacklist_count]  = esp_timer_get_time();
+    ctx->rss_blacklist_count++;
     ESP_LOGW(TAG, "Channel %d blacklisted (RSS unreachable)", channel_id);
 }
 
@@ -496,11 +518,29 @@ void controller_process_rss(void) {
         char url[2560];
         const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, ctx->feed_channel_id);
         int col_id = ch ? ch->collection_id : 0;
-        snprintf(url, sizeof(url),
-                 "%s/api/episodes?feed_url=%s&collection_id=%d&offset=%d&limit=%d",
-                 PODCAST_SERVER, ctx->feed_url, col_id, ctx->feed_offset, ctx->feed_limit);
+
+        /* Build the query by hand so feed_url is percent-encoded.  Feed URLs can
+         * contain '&'/'?'/'#'; leaving them raw lets them split the query string,
+         * so the server parses a truncated feed_url and returns 502 — which the
+         * client would then treat as a blacklist. */
+        int w = snprintf(url, sizeof(url), "%s/api/episodes?feed_url=", PODCAST_SERVER);
+        for (const char *p = ctx->feed_url; *p && w < (int)sizeof(url) - 4; p++) {
+            unsigned char c = (unsigned char)*p;
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+                url[w++] = (char)c;
+            } else {
+                w += snprintf(url + w, sizeof(url) - w, "%%%02X", c);
+            }
+        }
+        snprintf(url + w, sizeof(url) - w, "&collection_id=%d&offset=%d&limit=%d",
+                 col_id, ctx->feed_offset, ctx->feed_limit);
+
+        /* The server fetches + parses the RSS feed before responding (its own
+         * feed request can take ~15 s), so give it more headroom than the
+         * 15 s default to avoid a client-side timeout turning into a blacklist. */
         int st, len;
-        char *body = http_get_sync(url, &st, &len);
+        char *body = http_get_sync_timeout(url, &st, &len, 30000);
         memset(&ctx->feed_result, 0, sizeof(ctx->feed_result));
 
         if (!body) {
