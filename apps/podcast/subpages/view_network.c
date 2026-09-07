@@ -227,8 +227,9 @@ static lv_obj_t* build_loading(lv_obj_t* parent) {
     lv_label_set_text(label, "Loading.");
     lv_obj_set_style_text_color(label, lv_color_hex(0x999999), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
-    lv_obj_set_size(label, 160, 24);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 16, 0);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_margin_top(label, 16, 0);
 
     return label;
 }

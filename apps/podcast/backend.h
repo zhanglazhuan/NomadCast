@@ -11,8 +11,11 @@
 extern "C" {
 #endif
 
-/* Podcast proxy server — change this to the production cloud IP */
+/* Podcast proxy server — change this to the production cloud IP.
+ * (Guard allows the PC simulator to override it via -DPODCAST_SERVER=...) */
+#ifndef PODCAST_SERVER
 #define PODCAST_SERVER  "http://192.168.1.88:5088"
+#endif
 
 #define BK_MAX_TITLE    256
 #define BK_MAX_ARTIST   128

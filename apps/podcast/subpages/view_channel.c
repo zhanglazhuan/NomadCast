@@ -255,7 +255,9 @@ static void show_loading_and_poll(ChannelPageCtx *ctx) {
 
     ctx->loading_label = lv_label_create(ctx->list_container);
     lv_label_set_text(ctx->loading_label, "Loading...");
-    lv_obj_center(ctx->loading_label);
+    lv_obj_set_width(ctx->loading_label, LV_PCT(100));
+    lv_obj_set_style_text_align(ctx->loading_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_margin_top(ctx->loading_label, 16, 0);
     lv_obj_set_style_text_color(ctx->loading_label, lv_color_hex(0x999999), 0);
 
     if (ctx->poll_timer) lv_timer_del(ctx->poll_timer);
@@ -284,9 +286,10 @@ static void page_poll_cb(lv_timer_t *timer) {
                           ? g_rss_result()->error
                           : "Failed to load episodes.\nCheck network connection.";
         lv_label_set_text(empty, err);
-        lv_obj_center(empty);
+        lv_obj_set_width(empty, LV_PCT(100));
         lv_obj_set_style_text_color(empty, lv_color_hex(0x999999), 0);
         lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_margin_top(empty, 16, 0);
     }
 }
 
