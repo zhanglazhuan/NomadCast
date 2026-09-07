@@ -164,6 +164,11 @@ void podcast_controller_media_for_episode(struct PodcastApp *app, int eid,
  *  transcoding is disabled. Used by the list UI to skip the player page. */
 bool podcast_controller_episode_playable(struct PodcastApp *app, int eid);
 
+/** True if the episode's audio is already on SD as a complete M4A file. Used
+ *  by the channel list to show a green "downloaded" check instead of a
+ *  selectable download checkbox. */
+bool podcast_controller_is_downloaded(struct PodcastApp *app, int eid);
+
 /** Toggle play/pause of the current episode (true ADF pause/resume). No-op if
  *  no episode is loaded. Safe to call off the LVGL thread. */
 void podcast_controller_toggle_play_pause(struct PodcastApp *app);

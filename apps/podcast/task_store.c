@@ -137,16 +137,17 @@ static bool task_from_json(const char *line, DownloadTask *t) {
 static bool write_task_file(int id, const DownloadTask *t) {
     char path[512];
     snprintf(path, sizeof(path), "%s/%08d.json", TASK_STORE_DIR, id);
-    char tmp[520]; snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    FILE *f = fopen(tmp, "w");
-    if (!f) { ESP_LOGE(TAG, "write %s failed", tmp); return false; }
+    /* Write directly to the final path (no tmp+rename).  FatFs flushes a
+     * file's own directory entry on f_sync, but the directory-sector update
+     * from f_rename is only written back lazily — so the old tmp+rename left
+     * the JSON invisible after a power-cut/reboot ("Loaded 0 tasks" on every
+     * boot).  A direct write is a single small sector; fsync makes it durable. */
+    FILE *f = fopen(path, "w");
+    if (!f) { ESP_LOGE(TAG, "write %s failed", path); return false; }
     task_to_json(f, t);
     bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
     if (fclose(f) != 0) ok = false;
-    if (!ok) { unlink(tmp); return false; }
-    /* FatFS does not replace an existing destination on rename. */
-    remove(path);
-    if (rename(tmp, path) != 0) { unlink(tmp); return false; }
+    if (!ok) { unlink(path); return false; }
     ESP_LOGI(TAG, "Wrote task %d (st=%d)", id, (int)t->status);
     return true;
 }

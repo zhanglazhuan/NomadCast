@@ -30,6 +30,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "ff.h"      /* FatFS f_getfree — SD-mount check */
 #include "cJSON.h"
 
@@ -670,7 +671,9 @@ static bool dl_progress_cb(int bytes_done, int total_bytes, int speed_bps)
             DownloadTask *t = &m->download_tasks[idx];
             /* Live % — RAM only; persisted at completion, not every 500ms tick
              * (an SD write per tick would thrash the card). */
-            t->progress = (int)((int64_t)bytes_done * 100 / total_bytes);
+            int pct = (int)((int64_t)bytes_done * 100 / total_bytes);
+            t->progress = pct > 100 ? 100 : pct;   /* a proxy may under-declare
+                 * Content-Length and stream more; never show >100% */
             /* Learn bytes-per-audio-second to size queued (not-yet-open) tasks. */
             if (t->duration_sec > 0) {
                 int r = total_bytes / t->duration_sec;
@@ -782,6 +785,21 @@ static void dl_worker_task(void *arg)
 
             audio_player_log_memory("before-download");
             ESP_LOGI(TAG, "dl: downloading task %d → %s", task_id, s_path);
+
+            /* WiFi 诊断：确认 PS 模式未被复位为 MIN_MODEM（会把 TCP 下载吞吐塌到
+             * ~16 KB/s），并记录 RSSI 供速率关联。 */
+            {
+                wifi_ps_type_t ps = WIFI_PS_NONE;
+                wifi_ap_record_t ap;
+                memset(&ap, 0, sizeof(ap));
+                esp_wifi_get_ps(&ps);
+                esp_wifi_sta_get_ap_info(&ap);
+                const char *ps_name = ps == WIFI_PS_NONE ? "NONE"
+                                    : ps == WIFI_PS_MIN_MODEM ? "MIN_MODEM"
+                                    : ps == WIFI_PS_MAX_MODEM ? "MAX_MODEM" : "?";
+                ESP_LOGI(TAG, "dl: WiFi PS=%d(%s) RSSI=%d",
+                         (int)ps, ps_name, (int)ap.rssi);
+            }
 
             ctx->dl.current_task_id = task_id;
             ctx->dl.abort_current   = false;
@@ -1167,6 +1185,21 @@ bool podcast_controller_episode_playable(struct PodcastApp *app, int eid)
      * so it must be downloaded first. Other formats keep the old stream path. */
     const Episode *ep = podcast_model_get_episode_by_id(app, eid);
     return ep ? !podcast_is_m4a_url(ep->audio_url) : false;
+}
+
+bool podcast_controller_is_downloaded(struct PodcastApp *app, int eid)
+{
+    /* A network episode counts as "downloaded" only when its on-SD file exists
+     * AND is a complete M4A (moov atom present). Deriving the path from titles
+     * keeps this in sync with the downloader's file naming; probing the box
+     * structure means a mid-download partial file never shows as done. */
+    const Episode *ep = podcast_model_get_episode_by_id(app, eid);
+    if (!ep) return false;
+    const Channel *ch = podcast_model_get_channel_by_id(app, ep->channel_id);
+    if (!ch) return false;
+    char local[1536];
+    podcast_local_audio_path(ch->title, ep->title, local, sizeof(local));
+    return cache_local_file_complete(local);
 }
 
 void podcast_controller_toggle_play_pause(struct PodcastApp *app)

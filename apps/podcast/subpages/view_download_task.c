@@ -22,6 +22,13 @@ extern PodcastApp g_podcast_app;
 /* ---- 页面上下文 ---- */
 #define DL_PER_PAGE 20
 
+/* 任务行标题滚动区几何。行内容宽 = 240 - 2*8 (page.container pad_all=8)。 */
+#define DL_ROW_W       224   /* 行内容宽度 (px) */
+#define DL_TITLE_X      56   /* 标题区左偏移 */
+#define DL_STATUS_PAD    8   /* 状态文本右边距 */
+#define DL_STATUS_GAP    4   /* 标题区与状态文本之间的间隙 */
+#define DL_TITLE_MIN_W  24   /* 标题区最小宽度 */
+
 typedef struct DownloadTaskPageCtx_s {
     struct PodcastApp* app;
     lv_obj_t** task_cbs;
@@ -39,9 +46,14 @@ typedef struct DownloadTaskPageCtx_s {
     lv_obj_t* page_label;
     lv_obj_t* prev_btn;
     lv_obj_t* next_btn;
+    /* 实时进度刷新：每可见行的状态标签 + 任务 id，供 lv_timer 更新 "%d%%" */
+    lv_obj_t* row_status_labels[DL_PER_PAGE];
+    int       row_task_ids[DL_PER_PAGE];
+    int       row_visible;
 } DownloadTaskPageCtx;
 
 static DownloadTaskPageCtx *s_active_dl_page = NULL;
+static lv_timer_t *s_dl_refresh_timer = NULL;   /* 单例：500ms 刷新下载百分比 */
 
 static void dl_prev_page(lv_event_t *e);
 static void dl_next_page(lv_event_t *e);
@@ -71,6 +83,32 @@ static void on_download_complete_event(app_event_t event, const void *data)
 
     PodcastApp *app = s_active_dl_page->app;
     page_navigator_navigate_to(&app->view->page_nav, app, PAGE_DOWNLOAD_TASK, NULL);
+}
+
+/* ---- 实时刷新下载百分比 ----
+ * 下载 worker 在 CPU1 上更新 t->progress（8KB/块），本页只在构建时写一次 "%"，
+ * 故需一个 500ms 定时器把 DOWNLOADING 行的百分比刷成最新值。单例定时器，随
+ * 页面重建自动切到新的 s_active_dl_page；页面退出后靠 lv_obj_is_valid 短路。 */
+static void dl_refresh_progress_cb(lv_timer_t* t) {
+    (void)t;
+    DownloadTaskPageCtx* ctx = s_active_dl_page;
+    if (!ctx || !ctx->app || !ctx->app->model) return;
+    if (!lv_obj_is_valid(ctx->list_container)) return;
+    PodcastModel* m = ctx->app->model;
+
+    for (int r = 0; r < ctx->row_visible && r < DL_PER_PAGE; r++) {
+        lv_obj_t* lbl = ctx->row_status_labels[r];
+        if (!lbl || !lv_obj_is_valid(lbl)) continue;
+        int id = ctx->row_task_ids[r];
+        /* 按 id 找到任务，只刷新 DOWNLOADING 行的 "%"（其余状态文本不变） */
+        for (int i = 0; i < m->download_task_count; i++) {
+            if (m->download_tasks[i].id == id &&
+                m->download_tasks[i].status == DOWNLOAD_STATUS_DOWNLOADING) {
+                lv_label_set_text_fmt(lbl, "%d%%", m->download_tasks[i].progress);
+                break;
+            }
+        }
+    }
 }
 
 static void on_confirm_sheet_delete(lv_event_t* e) {
@@ -405,7 +443,7 @@ static void dl_next_page(lv_event_t *e) {
 
 /* ---- 构建单个下载任务行 ---- */
 static lv_obj_t* build_task_row(lv_obj_t* parent, const DownloadTask* task, int index,
-                                 DownloadTaskPageCtx* ctx) {
+                                 int row_idx, DownloadTaskPageCtx* ctx) {
     lv_obj_t* row = lv_obj_create(parent);
     lv_obj_set_size(row, LV_PCT(100), 32);
     lv_obj_set_style_border_width(row, 0, 0);
@@ -429,34 +467,79 @@ static lv_obj_t* build_task_row(lv_obj_t* parent, const DownloadTask* task, int 
     lv_obj_align(num, LV_ALIGN_LEFT_MID, 32, 0);
     lv_obj_set_style_text_color(num, lv_color_hex(0x999999), 0);
 
-    /* 标题 (曲目名) */
-    lv_obj_t* title = lv_label_create(row);
-    lv_label_set_text(title, task->episode_title);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 56, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
-
-    /* 状态区 (右对齐) */
+    /* 状态区 (右对齐) — 先确定状态文本，标题区宽度据此收缩 */
     uint32_t status_color;
     const char* status_text;
+    char pct_buf[12];
     switch (task->status) {
         case DOWNLOAD_STATUS_PENDING:
-            status_color = 0x888888; status_text = "Pending"; break;
+            status_color = 0x888888; status_text = "等待"; break;
         case DOWNLOAD_STATUS_DOWNLOADING:
-            status_color = 0x1976D2; status_text = NULL; break;  /* 显示百分比 */
+            status_color = 0x1976D2;
+            snprintf(pct_buf, sizeof(pct_buf), "%d%%", task->progress);
+            status_text = pct_buf; break;
         case DOWNLOAD_STATUS_COMPLETED:
-            status_color = 0x4CAF50; status_text = "Completed"; break;
+            status_color = 0x4CAF50; status_text = "完成"; break;
+        case DOWNLOAD_STATUS_FAILED:
+            status_color = 0xE53935; status_text = "失败"; break;
         default:
             status_color = 0x888888; status_text = "?"; break;
     }
 
     lv_obj_t* st = lv_label_create(row);
-    if (task->status == DOWNLOAD_STATUS_DOWNLOADING) {
-        lv_label_set_text_fmt(st, "%d%%", task->progress);
-    } else {
-        lv_label_set_text(st, status_text);
-    }
-    lv_obj_align(st, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_label_set_text(st, status_text);
+    lv_obj_align(st, LV_ALIGN_RIGHT_MID, -DL_STATUS_PAD, 0);
     lv_obj_set_style_text_color(st, lv_color_hex(status_color), 0);
+    lv_obj_set_style_text_font(st, g_cjk_font, 0);
+
+    /* 记录状态标签 + 任务 id，供 500ms 定时器刷新 DOWNLOADING 行的 "%" */
+    if (row_idx >= 0 && row_idx < DL_PER_PAGE) {
+        ctx->row_status_labels[row_idx] = st;
+        ctx->row_task_ids[row_idx]     = task->id;
+    }
+
+    /* 标题 (曲目名) — 放进固定宽度的裁剪滚动区，长标题横向滚动，不与状态/百分比重叠。
+     * 预留状态区宽度 = max(当前状态文本, "100%")：百分比会从 1 位涨到 3 位，右对齐
+     * 标签向左扩张，若只按当前文本（如 "0%"）预留就会和标题重叠。 */
+    lv_point_t tsz, ssz, psz;
+    lv_text_get_size(&tsz, task->episode_title, g_cjk_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&ssz, status_text, g_cjk_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&psz, "100%", g_cjk_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int32_t status_w = ssz.x > psz.x ? ssz.x : psz.x;
+    int32_t title_w = DL_ROW_W - DL_TITLE_X - DL_STATUS_PAD - DL_STATUS_GAP - status_w;
+    if (title_w < DL_TITLE_MIN_W) title_w = DL_TITLE_MIN_W;
+
+    lv_obj_t* title_box = lv_obj_create(row);
+    lv_obj_set_size(title_box, title_w, 32);
+    lv_obj_align(title_box, LV_ALIGN_LEFT_MID, DL_TITLE_X, 0);
+    lv_obj_set_style_pad_all(title_box, 0, 0);
+    lv_obj_set_style_border_width(title_box, 0, 0);
+    lv_obj_set_style_bg_opa(title_box, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(title_box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(title_box, LV_OBJ_FLAG_OVERFLOW_VISIBLE);  /* 裁剪超出的标题文本 */
+
+    lv_obj_t* title = lv_label_create(title_box);
+    lv_label_set_text(title, task->episode_title);
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+
+    /* 标题过长 → 横向滚动到尾部展示完整标题，停 2s 后回到起点循环 */
+    if (tsz.x > title_w) {
+        int32_t scroll_end = title_w - tsz.x;       /* 负值：向左滚动 */
+        uint32_t dur = (uint32_t)(-scroll_end) * 12; /* ~12 ms/px */
+        if (dur < 800) dur = 800;
+
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, title);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+        lv_anim_set_values(&a, 0, scroll_end);
+        lv_anim_set_duration(&a, dur);
+        lv_anim_set_repeat_delay(&a, 2000);
+        lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&a);
+    }
 
     /* 底部分隔线 */
     lv_obj_t* line = lv_obj_create(row);
@@ -472,6 +555,7 @@ static lv_obj_t* build_task_row(lv_obj_t* parent, const DownloadTask* task, int 
 static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     lv_obj_clean(parent);
     ctx->list_container = parent;
+    ctx->row_visible = 0;
 
     const DownloadTask* tasks = podcast_model_get_download_tasks(ctx->app, &ctx->task_count);
 
@@ -498,8 +582,9 @@ static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     ctx->task_checked = (bool *)calloc(visible, sizeof(bool));
     ctx->task_cbs = (lv_obj_t **)calloc(visible, sizeof(lv_obj_t *));
 
+    ctx->row_visible = visible;
     for (int i = 0; i < visible; i++)
-        build_task_row(parent, &tasks[start + i], start + i, ctx);
+        build_task_row(parent, &tasks[start + i], start + i, i, ctx);
 
     /* Update page label */
     if (ctx->page_label)
@@ -642,6 +727,10 @@ static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_dat
      * 浮在列表之上，避免按钮被 flex 布局挤出屏幕截断。
      * (Must be created after the list so ctx->action_bar is valid.) */
     build_action_bar(page.screen, ctx);
+
+    /* 500ms 定时器实时刷新下载百分比（单例，随页面重建自动切到新 ctx） */
+    if (!s_dl_refresh_timer)
+        s_dl_refresh_timer = lv_timer_create(dl_refresh_progress_cb, 500, NULL);
 
     s_active_dl_page = ctx;
 

@@ -39,6 +39,7 @@ typedef struct {
     lv_obj_t  *page_label;      /* "Page 1/3" label in header */
     lv_obj_t  *prev_btn;
     lv_obj_t  *next_btn;
+    bool       is_local;        /* true when listing a downloaded (Local) channel */
 } ChannelPageCtx;
 
 static void format_duration(int sec, char *buf, int sz) {
@@ -47,11 +48,10 @@ static void format_duration(int sec, char *buf, int sz) {
 
 static void set_all_checked(ChannelPageCtx *ctx, bool val) {
     for (int i = 0; i < ctx->episode_count; i++) {
+        if (!ctx->track_cbs[i]) continue;   /* downloaded — not selectable */
         ctx->track_checked[i] = val;
-        if (ctx->track_cbs[i]) {
-            if (val) lv_obj_add_state(ctx->track_cbs[i], LV_STATE_CHECKED);
-            else     lv_obj_remove_state(ctx->track_cbs[i], LV_STATE_CHECKED);
-        }
+        if (val) lv_obj_add_state(ctx->track_cbs[i], LV_STATE_CHECKED);
+        else     lv_obj_remove_state(ctx->track_cbs[i], LV_STATE_CHECKED);
     }
 }
 
@@ -110,13 +110,25 @@ static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int in
     lv_obj_set_user_data(row, (void *)(uintptr_t)track->id);
     lv_obj_add_event_cb(row, on_track_clicked, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *cb = lv_checkbox_create(row);
-    lv_obj_set_width(cb, 24);
-    lv_obj_align(cb, LV_ALIGN_LEFT_MID, 4, 0);
-    lv_obj_set_style_pad_all(cb, 0, 0);
-    lv_obj_set_user_data(cb, (void *)(uintptr_t)index);
-    lv_obj_add_event_cb(cb, on_checkbox_changed, LV_EVENT_VALUE_CHANGED, ctx);
-    ctx->track_cbs[index] = cb;
+    /* In a NETWORK channel, an already-downloaded episode shows a green check
+     * instead of a selectable checkbox — re-downloading is pointless, and the
+     * check can't be toggled. In a LOCAL channel every episode IS downloaded by
+     * definition, so the checkbox stays (selection → play/download still works). */
+    if (!ctx->is_local && podcast_controller_is_downloaded(&g_podcast_app, track->id)) {
+        lv_obj_t *ok = lv_label_create(row);
+        lv_label_set_text(ok, LV_SYMBOL_OK);
+        lv_obj_align(ok, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_set_style_text_color(ok, lv_color_hex(0x4CAF50), 0);
+        ctx->track_cbs[index] = NULL;   /* not selectable — no checkbox object */
+    } else {
+        lv_obj_t *cb = lv_checkbox_create(row);
+        lv_obj_set_width(cb, 24);
+        lv_obj_align(cb, LV_ALIGN_LEFT_MID, 4, 0);
+        lv_obj_set_style_pad_all(cb, 0, 0);
+        lv_obj_set_user_data(cb, (void *)(uintptr_t)index);
+        lv_obj_add_event_cb(cb, on_checkbox_changed, LV_EVENT_VALUE_CHANGED, ctx);
+        ctx->track_cbs[index] = cb;
+    }
 
     char buf[16];
     snprintf(buf, sizeof(buf), "%02d", episode_num);
@@ -301,7 +313,7 @@ static void on_download_clicked(lv_event_t *e) {
     const char *ch_name = ch ? ch->title : "Unknown";
     int submitted = 0;
     for (int i = 0; i < ctx->episode_count; i++) {
-        if (!ctx->track_checked[i]) continue;
+        if (!ctx->track_checked[i] || !ctx->track_cbs[i]) continue;
         lv_obj_t *row = lv_obj_get_parent(ctx->track_cbs[i]);
         int eid = (int)(uintptr_t)lv_obj_get_user_data(row);
         const Episode *ep = podcast_model_get_episode_by_id(&g_podcast_app, eid);
@@ -330,7 +342,7 @@ static void on_play_selected_clicked(lv_event_t *e) {
     if (!ids) return;
     int wi = 0;
     for (int i = 0; i < ctx->episode_count; i++) {
-        if (!ctx->track_checked[i]) continue;
+        if (!ctx->track_checked[i] || !ctx->track_cbs[i]) continue;
         lv_obj_t *row = lv_obj_get_parent(ctx->track_cbs[i]);
         ids[wi++] = (int)(uintptr_t)lv_obj_get_user_data(row);
     }
@@ -484,6 +496,7 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     ctx->channel_id = channel_id;
     ctx->cur_page = 0;
     ctx->total_pages = 1;
+    ctx->is_local = (channel && channel->downloaded);
     app->view->page_nav.nav_ctx = ctx;
 
     /* Info button — shows channel details in bottom sheet */

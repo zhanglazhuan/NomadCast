@@ -292,12 +292,17 @@ bool http_download_to_file(const char *url, const char *file_path,
             esp_http_client_cleanup(client);
             return false;
         }
-        ESP_LOGI(TAG, "dl: %s → HTTP 200, len=%d", current_url, content_len);
-
         /* A server honoring Range returns 206 and the response length is only
          * the remaining suffix.  If it ignores Range (200), restart safely. */
         bool resumed = (status == 206 && resume_offset > 0);
         long base_offset = resumed ? resume_offset : 0;
+        /* Full file size = resume offset + remaining suffix.  The progress
+         * callback must divide total bytes against THIS, not content_len,
+         * otherwise a resumed download shows 100% far too early. */
+        long full_size = content_len > 0 ? base_offset + content_len : 0;
+
+        ESP_LOGI(TAG, "dl: %s → HTTP %d, len=%d%s", current_url, status, content_len,
+                 resumed ? " (resume)" : "");
         FILE *f = fopen(file_path, resumed ? "ab" : "wb");
         if (!f) {
             ESP_LOGE(TAG, "dl: cannot open %s", file_path);
@@ -357,7 +362,7 @@ bool http_download_to_file(const char *url, const char *file_path,
                  * next 8 KB read) instead of up to 500 ms later. The callback
                  * skips its speed smoothing when speed_bps is 0, so calling it
                  * between window boundaries is cheap. */
-                if (progress_cb && !progress_cb(total, content_len, speed_bps)) {
+                if (progress_cb && !progress_cb(total, (int)full_size, speed_bps)) {
                     ESP_LOGW(TAG, "dl: aborted by caller");
                     aborted = true;
                     break;
@@ -389,7 +394,10 @@ bool http_download_to_file(const char *url, const char *file_path,
         }
 
         int expected_total = content_len > 0 ? (int)base_offset + content_len : 0;
-        if (total > 0 && (content_len > 0 ? total == expected_total : complete_received)) {
+        /* Accept `total >= expected_total` (not `==`) because a proxy may
+         * under-declare Content-Length and stream more bytes than promised;
+         * the read loop then ends at a clean EOF with total past expected. */
+        if (total > 0 && (content_len > 0 ? total >= expected_total : complete_received)) {
             ESP_LOGI(TAG, "dl: saved %d bytes to %s", total, file_path);
             return true;
         } else {

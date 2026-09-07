@@ -10,7 +10,10 @@
  * (O(episodes-in-channel)), not the whole library. The stable channel identity
  * is `collection_id` (falls back to the transient chart id `cid`), so the same
  * podcast always maps to the same file — channel dedup is inherent, and episode
- * dedup is by the stable `audio_url`. Each file is written atomically (tmp+rename).
+ * dedup is by the stable `audio_url`. Each file is written directly + fsync:
+ * FatFs flushes a file's own directory entry on f_sync but only writes back a
+ * rename's directory update lazily, so the old tmp+rename left buckets invisible
+ * after a power-cut/reboot.
  */
 #include "local_cache.h"
 #include "model.h"
@@ -37,6 +40,7 @@
 #define DL_META_DIR   "/sdcard/.nomadcast/downloads/.meta"        /* per-channel buckets */
 #define DL_META_OLD   "/sdcard/.nomadcast/downloads/.meta.json"   /* legacy monolith (migration) */
 #define DL_LOG_PATH   "/sdcard/.nomadcast/downloads/dl.log"
+#define DL_BASE_PATH  "/sdcard/.nomadcast/downloads"              /* downloaded audio tree */
 
 /* ── JSON helpers ──────────────────────────────────────────────────────── */
 
@@ -143,7 +147,11 @@ static void channel_file_path(char *out, int sz, int canon) {
     snprintf(out, sz, "%s/%d.json", DL_META_DIR, canon);
 }
 
-/* Atomically rewrite one channel's bucket from the current in-RAM model. */
+/* Rewrite one channel's bucket from the current in-RAM model.  Written
+ * directly to the final path (no tmp+rename): FatFs flushes a file's own
+ * directory entry on f_sync, but the directory update from f_rename is only
+ * written back lazily, so the old swap left the bucket invisible after a
+ * power-cut/reboot — downloaded audio then vanished from the local list. */
 static void local_write_channel(struct PodcastApp *app, int canon) {
     PodcastModel *m = app->model;
     const Channel *c = NULL;
@@ -151,11 +159,10 @@ static void local_write_channel(struct PodcastApp *app, int canon) {
         if (m->local_channels[i].id == canon) { c = &m->local_channels[i]; break; }
     if (!c) return;
 
-    char path[320], tmp[328];
+    char path[320];
     channel_file_path(path, sizeof(path), canon);
-    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
 
-    FILE *f = fopen(tmp, "wb");
+    FILE *f = fopen(path, "wb");
     if (!f) return;
     fprintf(f, "{\"cid\":%d,\"col\":%d,\"ch\":", canon, c->collection_id);
     json_write_str(f, c->title);
@@ -173,12 +180,9 @@ static void local_write_channel(struct PodcastApp *app, int canon) {
     fprintf(f, "\n]}\n");
     fflush(f);
 #if defined(ESP_PLATFORM)
-    fsync(fileno(f));      /* force write-through before the swap */
+    fsync(fileno(f));      /* force write-through — makes the bucket durable */
 #endif
     fclose(f);
-
-    remove(path);          /* FATFS rename fails if the destination exists */
-    rename(tmp, path);     /* atomic-ish swap: the tmp already holds the full data */
 }
 
 /* Parse one bucket file's contents into the model. */
@@ -221,6 +225,220 @@ static void load_buckets(struct PodcastApp *app) {
     closedir(d);
 }
 
+/* FNV-1a 32-bit hash → positive int (used to derive stable, collision-rare ids
+ * for channels/episodes recovered from filenames alone). */
+static int fnv1a_positive(const char *s) {
+    uint32_t h = 2166136261u;
+    for (const char *p = s; p && *p; p++) { h ^= (unsigned char)*p; h *= 16777619u; }
+    return (int)((h & 0x7FFFFFFFu) | 1u);   /* keep > 0 so bucket/parse accepts it */
+}
+
+/* Rebuild the on-SD path a downloaded episode lives at, from channel + episode
+ * titles.  Mirrors controller.c's podcast_local_audio_path() so recovery/prune
+ * can never diverge from the downloader/player naming. */
+static void local_audio_path(const char *ch_title, const char *ep_title,
+                             char *out, int out_sz)
+{
+    char ch_safe[256], ep_safe[512];
+    snprintf(ch_safe, sizeof(ch_safe), "%s", ch_title ? ch_title : "unknown");
+    snprintf(ep_safe, sizeof(ep_safe), "%s.m4a", ep_title ? ep_title : "audio");
+    for (char *p = ch_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
+    for (char *p = ep_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
+    snprintf(out, out_sz, DL_BASE_PATH "/%s/%s", ch_safe, ep_safe);
+}
+
+static bool read_u32_at(FILE *f, long off, uint32_t *out) {
+    unsigned char b[4];
+    if (fseek(f, off, SEEK_SET) != 0) return false;
+    if (fread(b, 1, 4, f) != 4) return false;
+    *out = ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
+           ((uint32_t)b[2] << 8) | (uint32_t)b[3];
+    return true;
+}
+
+static bool read_u64_at(FILE *f, long off, uint64_t *out) {
+    unsigned char b[8];
+    if (fseek(f, off, SEEK_SET) != 0) return false;
+    if (fread(b, 1, 8, f) != 8) return false;
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++) v = (v << 8) | b[i];
+    *out = v;
+    return true;
+}
+
+/* Probe a local .m4a: is it a complete, playable file, and (optionally) how
+ * long is it?  Xiaoyuzhou encodes these with the moov atom at the END of the
+ * file, so a truncated download still has a valid ftyp up front but no moov —
+ * the decoder then can't identify it ("Detect audio type is PCM") and playback
+ * fails.  A complete file always carries moov; scanning the top-level box
+ * headers is a handful of 8-byte reads + seeks, O(top-level boxes), not
+ * O(file size).  duration_sec, when non-NULL, is filled from moov→mvhd
+ * (timescale/duration); left 0 if unknown. */
+static bool mp4_probe(const char *path, int *duration_sec) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+    long file_size = ftell(f);
+    if (file_size < 8) { fclose(f); return false; }
+    if (duration_sec) *duration_sec = 0;
+
+    /* Pass 1 — find the top-level moov box. */
+    long moov_payload = -1, moov_len = 0;
+    long off = 0;
+    while (off >= 0 && file_size - off >= 8) {
+        if (fseek(f, off, SEEK_SET) != 0) break;
+        unsigned char hdr[8];
+        if (fread(hdr, 1, 8, f) != 8) break;
+
+        unsigned long size = ((unsigned long)hdr[0] << 24) |
+                             ((unsigned long)hdr[1] << 16) |
+                             ((unsigned long)hdr[2] << 8) |
+                             ((unsigned long)hdr[3]);
+        char type[5] = { hdr[4], hdr[5], hdr[6], hdr[7], 0 };
+        unsigned long hdr_sz = 8;
+        if (size == 1) {                       /* 64-bit extended size */
+            unsigned char ext[8];
+            if (fread(ext, 1, 8, f) != 8) break;
+            size = 0;
+            for (int i = 0; i < 8; i++) size = (size << 8) | ext[i];
+            hdr_sz = 16;
+        } else if (size == 0) {                /* box runs to EOF */
+            size = (unsigned long)(file_size - off);
+        }
+        if (size < hdr_sz) break;              /* corrupt box header */
+        if (size > (unsigned long)(file_size - off)) break;   /* past EOF → truncated */
+
+        if (strcmp(type, "moov") == 0) {
+            moov_payload = off + (long)hdr_sz;
+            moov_len = (long)(size - hdr_sz);
+            break;
+        }
+        off += (long)size;
+    }
+    bool has_moov = (moov_payload >= 0);
+
+    /* Pass 2 — inside moov, find mvhd and read the duration. */
+    if (has_moov && duration_sec && moov_len >= 8) {
+        long moov_end = moov_payload + moov_len;
+        if (moov_end > file_size) moov_end = file_size;
+        long p = moov_payload;
+        while (p >= 0 && moov_end - p >= 8) {
+            if (fseek(f, p, SEEK_SET) != 0) break;
+            unsigned char hdr[8];
+            if (fread(hdr, 1, 8, f) != 8) break;
+            unsigned long size = ((unsigned long)hdr[0] << 24) |
+                                 ((unsigned long)hdr[1] << 16) |
+                                 ((unsigned long)hdr[2] << 8) |
+                                 ((unsigned long)hdr[3]);
+            char type[5] = { hdr[4], hdr[5], hdr[6], hdr[7], 0 };
+            unsigned long hdr_sz = 8;
+            if (size == 1) {
+                unsigned char ext[8];
+                if (fread(ext, 1, 8, f) != 8) break;
+                size = 0;
+                for (int i = 0; i < 8; i++) size = (size << 8) | ext[i];
+                hdr_sz = 16;
+            } else if (size == 0) {
+                size = (unsigned long)(moov_end - p);
+            }
+            if (size < hdr_sz) break;
+            if (size > (unsigned long)(moov_end - p)) break;
+
+            if (strcmp(type, "mvhd") == 0) {
+                unsigned char ver;
+                if (fseek(f, p + 8, SEEK_SET) == 0 && fread(&ver, 1, 1, f) == 1) {
+                    uint32_t timescale = 0;
+                    uint64_t duration = 0;
+                    if (ver == 1) {
+                        read_u32_at(f, p + 28, &timescale);
+                        read_u64_at(f, p + 32, &duration);
+                    } else {
+                        uint32_t dur32 = 0;
+                        read_u32_at(f, p + 20, &timescale);
+                        read_u32_at(f, p + 24, &dur32);
+                        duration = dur32;
+                    }
+                    if (timescale > 0) *duration_sec = (int)(duration / timescale);
+                }
+                break;
+            }
+            p += (long)size;
+        }
+    }
+
+    fclose(f);
+    return has_moov;
+}
+
+/* Public complete-file check — lets the controller mark a network episode as
+ * "downloaded" (green check) without exposing the box parser. */
+bool cache_local_file_complete(const char *path) {
+    return mp4_probe(path, NULL);
+}
+
+/* Recover downloaded audio whose .meta bucket was lost (power cut before the
+ * directory flush, or an SD card migrated without its index). Scans the
+ * downloads tree and re-indexes any channel that has .m4a files but no entry in
+ * the local model. Metadata that can't be recovered from a filename (CDN url,
+ * duration, collection id) is left empty/zero; playback still works because the
+ * local path is re-derived from channel + episode titles. */
+static void recover_orphaned_downloads(struct PodcastApp *app) {
+    PodcastModel *m = app->model;
+    if (!m) return;
+
+    DIR *root = opendir(DL_BASE_PATH);
+    if (!root) return;
+
+    struct dirent *de;
+    while ((de = readdir(root)) != NULL) {
+        if (de->d_name[0] == '.') continue;   /* skip . .. .meta */
+
+        char chdir[384];
+        snprintf(chdir, sizeof(chdir), "%s/%s", DL_BASE_PATH, de->d_name);
+        struct stat st;
+        if (stat(chdir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+
+        const char *ch_title = de->d_name;
+        int canon = fnv1a_positive(ch_title);
+
+        /* Skip if the model already knows this channel by title (real
+         * collection_id bucket or a previous recovery) — avoids duplicates. */
+        bool exists = false;
+        for (int i = 0; i < m->local_channel_count; i++)
+            if (strcmp(m->local_channels[i].title, ch_title) == 0) { exists = true; break; }
+        if (exists) continue;
+
+        DIR *cd = opendir(chdir);
+        if (!cd) continue;
+
+        bool added_any = false;
+        struct dirent *fde;
+        while ((fde = readdir(cd)) != NULL) {
+            if (fde->d_name[0] == '.') continue;
+            size_t len = strlen(fde->d_name);
+            if (len < 5 || strcmp(fde->d_name + len - 4, ".m4a") != 0) continue;
+
+            /* Index only complete M4A files — skip empty and truncated ones
+             * (a failed/partial download lacks the trailing moov atom). */
+            char fpath[640];
+            snprintf(fpath, sizeof(fpath), "%s/%s", chdir, fde->d_name);
+            int dur = 0;
+            if (!mp4_probe(fpath, &dur)) continue;
+
+            char ep_title[256];
+            snprintf(ep_title, sizeof(ep_title), "%.*s", (int)(len - 4), fde->d_name);
+
+            if (local_model_add(app, canon, 0, ch_title,
+                                fnv1a_positive(fpath), ep_title, fpath, dur))
+                added_any = true;
+        }
+        closedir(cd);
+
+        if (added_any) local_write_channel(app, canon);
+    }
+    closedir(root);
+}
+
 /* One-time: split the legacy monolithic .meta.json into per-channel buckets. */
 static void migrate_old(struct PodcastApp *app) {
     char *buf = read_file(DL_META_OLD);
@@ -259,6 +477,76 @@ bool cache_local_has_episode(struct PodcastApp *app, int episode_id) {
     return false;
 }
 
+/* Drop local-list entries whose audio file is missing/empty/truncated.  Runs
+ * after load + recovery so a failed download (or an earlier recovery that
+ * indexed a partial file) doesn't leave a broken card in the Local page. */
+static void prune_incomplete_local(struct PodcastApp *app) {
+    PodcastModel *m = app->model;
+    if (!m) return;
+
+    bool changed = false;
+    int write = 0;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        Episode *e = &m->local_episodes[i];
+        const Channel *ch = NULL;
+        for (int j = 0; j < m->local_channel_count; j++)
+            if (m->local_channels[j].id == e->channel_id) { ch = &m->local_channels[j]; break; }
+        if (!ch) { changed = true; continue; }   /* orphaned episode */
+
+        char path[1536];
+        local_audio_path(ch->title, e->title, path, sizeof(path));
+        if (mp4_probe(path, NULL)) {
+            if (write != i) m->local_episodes[write] = m->local_episodes[i];
+            write++;
+        } else {
+            printf("[INF] prune: dropping incomplete %s\n", path);
+            fflush(stdout);
+            remove(path);   /* free the dead bytes */
+            changed = true;
+        }
+    }
+    m->local_episode_count = write;
+    if (write > 0) {
+        Episode *ne = realloc(m->local_episodes, write * sizeof(Episode));
+        if (ne) m->local_episodes = ne;
+    } else {
+        free(m->local_episodes);
+        m->local_episodes = NULL;
+    }
+
+    /* Recompute channel episode counts; drop channels left with none. */
+    for (int j = 0; j < m->local_channel_count; j++) m->local_channels[j].episode_count = 0;
+    for (int i = 0; i < m->local_episode_count; i++)
+        for (int j = 0; j < m->local_channel_count; j++)
+            if (m->local_channels[j].id == m->local_episodes[i].channel_id)
+                m->local_channels[j].episode_count++;
+
+    int cw = 0;
+    for (int j = 0; j < m->local_channel_count; j++) {
+        if (m->local_channels[j].episode_count > 0) {
+            if (cw != j) m->local_channels[cw] = m->local_channels[j];
+            cw++;
+        } else {
+            char meta[320];
+            channel_file_path(meta, sizeof(meta), m->local_channels[j].id);
+            remove(meta);
+            changed = true;
+        }
+    }
+    m->local_channel_count = cw;
+    if (cw > 0) {
+        Channel *nc = realloc(m->local_channels, cw * sizeof(Channel));
+        if (nc) m->local_channels = nc;
+    } else {
+        free(m->local_channels);
+        m->local_channels = NULL;
+    }
+
+    if (changed)
+        for (int j = 0; j < m->local_channel_count; j++)
+            local_write_channel(app, m->local_channels[j].id);
+}
+
 void cache_local_init(struct PodcastApp *app) {
     if (!app || !app->model) return;
     downloads_ensure_dir();
@@ -266,6 +554,12 @@ void cache_local_init(struct PodcastApp *app) {
     struct stat st;
     if (stat(DL_META_OLD, &st) == 0) migrate_old(app);   /* upgrade legacy monolith once */
     else                            load_buckets(app);
+
+    /* Recover audio files whose index was lost (power-cut before flush). */
+    recover_orphaned_downloads(app);
+
+    /* Drop any recovered/loaded entry whose file is no longer complete. */
+    prune_incomplete_local(app);
 
     if (app->model->local_episode_count > 0) {
         app->model->local_has_content = true;

@@ -21,4 +21,9 @@ void cache_local_add(struct PodcastApp *app,
  *  Used to dedup the boot-time backfill from completed download tasks. */
 bool cache_local_has_episode(struct PodcastApp *app, int episode_id);
 
+/** True if the on-SD file at `path` is a complete, playable M4A (has a moov
+ *  atom).  False for missing/empty/truncated files.  Used to mark a network
+ *  episode as "downloaded" without exposing the box parser. */
+bool cache_local_file_complete(const char *path);
+
 #endif
