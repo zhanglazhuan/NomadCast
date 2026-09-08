@@ -323,7 +323,8 @@ bool http_download_to_file(const char *url, const char *file_path,
             return false;
         }
 
-        /* Heap buffer — 8KB on task stack would risk overflow */
+        /* Heap buffer — 8KB on task stack would risk overflow. PSRAM to
+         * conserve scarce internal DRAM. */
         char *buf = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
         int total = (int)base_offset, last_log = total;
         bool first_chunk = true;

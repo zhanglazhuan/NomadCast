@@ -688,10 +688,9 @@ static bool dl_progress_cb(int bytes_done, int total_bytes, int speed_bps)
 
     if (!dl->running || dl->abort_current) return false;   /* stop/cancel */
     if (dl->user_paused)   return false;   /* user pause — abort the in-flight transfer */
-    if (audio_player_is_playing()) {        /* playback started → yield */
-        dl->yield_to_audio = true;
-        return false;                       /* http_download_to_file aborts + unlinks partial */
-    }
+    /* Playback no longer interrupts a download: the transfer's 8 KB buffer and
+     * the esp_http_client buffer both live in PSRAM, so a playing track can keep
+     * running concurrently without stealing the download's DRAM. */
     return true;
 }
 
@@ -750,14 +749,12 @@ static void dl_worker_task(void *arg)
             PodcastApp *app = &g_podcast_app;
             if (!app || !app->model) break;
 
-            /* Priority: Display > Playback > Download.
-             * If audio is actively PLAYING, don't steal its memory — wait.
-             * If paused, release the pipeline (position saved) to free DRAM. */
-            if (audio_player_is_playing()) {
-                break;  /* playback is running — retry later */
-            }
-            if (audio_player_is_active() && !audio_player_is_local_source() &&
-                audio_player_memory_pressure()) {
+            /* Playback and download now run concurrently: the download's buffers
+             * are PSRAM-backed, so a playing track no longer blocks the worker.
+             * A *paused* (not playing) pipeline still gets released below to
+             * reclaim its DRAM — its position is saved for in-place resume. */
+            if (audio_player_is_active() && !audio_player_is_playing() &&
+                !audio_player_is_local_source() && audio_player_memory_pressure()) {
                 ESP_LOGW(TAG, "dl: releasing paused audio pipeline under DRAM pressure");
                 audio_player_release();
                 vTaskDelay(pdMS_TO_TICKS(300));
@@ -776,8 +773,10 @@ static void dl_worker_task(void *arg)
             /* A paused local M4A keeps its decoder alive for in-place resume, but
              * that holds DRAM the download needs. Now that a task is queued,
              * release the paused pipeline (position is saved) so the download can
-             * proceed; a later resume rebuilds and re-seeks from that offset. */
-            if (audio_player_is_active() && audio_player_is_local_source()) {
+             * proceed; a later resume rebuilds and re-seeks from that offset.
+             * Only PAUSED audio is released — a playing track stays untouched. */
+            if (audio_player_is_active() && !audio_player_is_playing() &&
+                audio_player_is_local_source()) {
                 ESP_LOGI(TAG, "dl: releasing paused local audio to download");
                 audio_player_release();
                 vTaskDelay(pdMS_TO_TICKS(100));

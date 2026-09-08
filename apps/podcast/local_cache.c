@@ -429,6 +429,8 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
             }
         }
         if (!found) canon = fnv1a_positive(ch_title);
+        printf("[DBG] recover: dir='%s' found=%d canon=%d\n", ch_title, found, canon);
+        fflush(stdout);
 
         DIR *cd = opendir(chdir);
         if (!cd) continue;
@@ -452,9 +454,11 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
 
             /* local_model_add dedups by (channel, title), so an episode already
              * indexed (normal download or a previous recovery) is skipped. */
-            if (local_model_add(app, canon, col, ch_title,
-                                fnv1a_positive(fpath), ep_title, fpath, dur))
-                added_any = true;
+            bool r_added = local_model_add(app, canon, col, ch_title,
+                                fnv1a_positive(fpath), ep_title, fpath, dur);
+            printf("[DBG] recover: file='%s' dur=%d added=%d\n", fpath, dur, r_added);
+            fflush(stdout);
+            if (r_added) added_any = true;
         }
         closedir(cd);
 
@@ -523,7 +527,8 @@ static void prune_incomplete_local(struct PodcastApp *app) {
             if (write != i) m->local_episodes[write] = m->local_episodes[i];
             write++;
         } else {
-            printf("[INF] prune: dropping incomplete %s\n", path);
+            printf("[DBG] prune: DROP id=%d ch='%s'(id=%d) ep='%s' path=%s\n",
+                   e->id, ch->title, ch->id, e->title, path);
             fflush(stdout);
             remove(path);   /* free the dead bytes */
             changed = true;
@@ -589,6 +594,20 @@ void cache_local_init(struct PodcastApp *app) {
         app->model->local_has_content = true;
         app->model->local_sd_mounted  = true;
     }
+
+    /* DEBUG: dump final local model */
+    printf("[DBG] cache_init: %d channels, %d episodes\n",
+           app->model->local_channel_count, app->model->local_episode_count);
+    for (int i = 0; i < app->model->local_channel_count; i++) {
+        Channel *c = &app->model->local_channels[i];
+        printf("[DBG]   ch id=%d col=%d epc=%d title='%s'\n",
+               c->id, c->collection_id, c->episode_count, c->title);
+    }
+    for (int i = 0; i < app->model->local_episode_count; i++) {
+        Episode *e = &app->model->local_episodes[i];
+        printf("[DBG]   ep id=%d ch=%d title='%s'\n", e->id, e->channel_id, e->title);
+    }
+    fflush(stdout);
 }
 
 void cache_local_add(struct PodcastApp *app,
