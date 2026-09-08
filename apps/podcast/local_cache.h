@@ -21,6 +21,12 @@ void cache_local_add(struct PodcastApp *app,
  *  Used to dedup the boot-time backfill from completed download tasks. */
 bool cache_local_has_episode(struct PodcastApp *app, int episode_id);
 
+/** Remove one downloaded episode: delete its audio file on SD, drop it from the
+ *  local library model, and rewrite (or delete) the owning channel's metadata
+ *  bucket. If the channel is left with no episodes it is removed too.
+ *  Returns true if the episode was found and removed. */
+bool cache_local_remove_episode(struct PodcastApp *app, int episode_id);
+
 /** True if the on-SD file at `path` is a complete, playable M4A (has a moov
  *  atom).  False for missing/empty/truncated files.  Used to mark a network
  *  episode as "downloaded" without exposing the box parser. */

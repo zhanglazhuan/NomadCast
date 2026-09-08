@@ -126,6 +126,10 @@ local_content_state_t podcast_controller_check_local_content(struct PodcastApp *
  *  Called from the Local page after a left-swipe → confirm. */
 void podcast_controller_delete_channel_local(struct PodcastApp *app, int channel_id);
 
+/** Delete a single downloaded episode (audio file + library metadata).
+ *  Called from the Local channel's episode list after a Delete → confirm. */
+void podcast_controller_delete_episode_local(struct PodcastApp *app, int episode_id);
+
 /* ── Player ──────────────────────────────────────────────────────────────── */
 
 /** Build the URL the ESP32 actually fetches for playback/download.

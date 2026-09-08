@@ -195,6 +195,11 @@ def api_raw():
             headers["Range"] = request.headers["Range"]
         upstream = req.get(audio_url, headers=headers, stream=True, timeout=30,
                            allow_redirects=True)
+        # Forward a 416 (Range Not Satisfiable) verbatim: it signals the client's
+        # resume offset is past EOF (its local file is already complete). Hiding
+        # it as a 502 makes the client retry blindly instead of recovering.
+        if upstream.status_code == 416:
+            return Response("", status=416)
         upstream.raise_for_status()
 
         content_type = upstream.headers.get("Content-Type", "application/octet-stream")

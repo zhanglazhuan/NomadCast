@@ -809,8 +809,19 @@ static void dl_worker_task(void *arg)
              * times before marking FAILED — but stop immediately if the user
              * cancelled (ctx->dl.abort_current) or audio started (ctx->dl.yield_to_audio). */
             bool ok = false;
+            /* A PENDING task can already have its full file on disk: a power
+             * cut between the final byte and the COMPLETED status write leaves
+             * the persisted state DOWNLOADING, which dl_resume_pending resets to
+             * PENDING on boot. Resuming such a file asks for bytes=<size>-
+             * (past EOF) → CDN 416 → proxy 502. Detect a complete M4A up front
+             * and skip the transfer instead of re-downloading the whole file. */
+            if (cache_local_file_complete(s_path)) {
+                ESP_LOGI(TAG, "dl: task %d already complete on disk — marking done",
+                         task_id);
+                ok = true;
+            }
             g_dl_cb_ctx = &ctx->dl;
-            for (int attempt = 1; attempt <= DL_MAX_ATTEMPTS; attempt++) {
+            for (int attempt = 1; attempt <= DL_MAX_ATTEMPTS && !ok; attempt++) {
                 ok = http_download_to_file(s_url, s_path, dl_progress_cb);
                 if (ok || ctx->dl.abort_current || ctx->dl.yield_to_audio) break;
                 if (attempt < DL_MAX_ATTEMPTS) {
@@ -1505,4 +1516,13 @@ void podcast_controller_delete_channel_local(struct PodcastApp *app, int channel
 
     printf("[INF] delete_channel_local: %d files deleted, done\n", deleted_files);
     fflush(stdout);
+}
+
+/* Delete one downloaded episode (audio file + library metadata).
+ * Persistence lives in local_cache.c so the bucket rewrite shares the same
+ * path/naming helpers the downloader/loader use. */
+void podcast_controller_delete_episode_local(struct PodcastApp *app, int episode_id)
+{
+    if (!app || !app->model) return;
+    cache_local_remove_episode(app, episode_id);
 }

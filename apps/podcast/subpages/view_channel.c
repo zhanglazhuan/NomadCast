@@ -40,6 +40,7 @@ typedef struct {
     lv_obj_t  *prev_btn;
     lv_obj_t  *next_btn;
     bool       is_local;        /* true when listing a downloaded (Local) channel */
+    lv_bottom_sheet_t *confirm_sheet;   /* Delete-confirmation popup */
 } ChannelPageCtx;
 
 static void format_duration(int sec, char *buf, int sz) {
@@ -353,6 +354,129 @@ static void on_play_selected_clicked(lv_event_t *e) {
     PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, first_id);
 }
 
+/* ── Local episode delete (gray "Delete" button replaces "Download") ── */
+
+static int count_checked(ChannelPageCtx *ctx) {
+    int n = 0;
+    for (int i = 0; i < ctx->episode_count; i++)
+        if (ctx->track_checked[i] && ctx->track_cbs[i]) n++;
+    return n;
+}
+
+static void on_confirm_sheet_delete(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (ctx) ctx->confirm_sheet = NULL;
+}
+
+static void on_delete_cancel(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (ctx && ctx->confirm_sheet) {
+        lv_bottom_sheet_close(ctx->confirm_sheet);
+        ctx->confirm_sheet = NULL;
+    }
+}
+
+static void on_delete_confirm(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (!ctx) return;
+    if (ctx->confirm_sheet) {
+        lv_bottom_sheet_close(ctx->confirm_sheet);
+        ctx->confirm_sheet = NULL;
+    }
+
+    /* Re-collect checked episode ids — checkbox state is still valid. */
+    int n = count_checked(ctx);
+    if (n <= 0) return;
+    int cid = ctx->channel_id;
+
+    for (int i = 0; i < ctx->episode_count; i++) {
+        if (!ctx->track_checked[i] || !ctx->track_cbs[i]) continue;
+        lv_obj_t *row = lv_obj_get_parent(ctx->track_cbs[i]);
+        int eid = (int)(uintptr_t)lv_obj_get_user_data(row);
+        podcast_controller_delete_episode_local(&g_podcast_app, eid);
+    }
+
+    /* Refresh the view. If the channel still has episodes, rebuild its episode
+     * list; if every episode was deleted the channel is gone — go back to Local. */
+    if (podcast_model_get_channel_by_id(&g_podcast_app, cid)) {
+        int *id_ptr = malloc(sizeof(int));
+        *id_ptr = cid;
+        page_navigator_navigate_to(&g_podcast_app.view->page_nav, &g_podcast_app,
+                                   PAGE_CHANNEL, id_ptr);
+    } else {
+        page_navigator_navigate_to(&g_podcast_app.view->page_nav, &g_podcast_app,
+                                   PAGE_LOCAL, NULL);
+    }
+}
+
+static void on_delete_selected_clicked(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (!ctx || ctx->confirm_sheet) return;
+
+    int n = count_checked(ctx);
+    if (n <= 0) return;
+
+    /* Build the confirmation message from the selected episode title(s). */
+    char msg[512];
+    if (n == 1) {
+        const char *title = NULL;
+        for (int i = 0; i < ctx->episode_count; i++) {
+            if (!ctx->track_checked[i] || !ctx->track_cbs[i]) continue;
+            lv_obj_t *row = lv_obj_get_parent(ctx->track_cbs[i]);
+            int eid = (int)(uintptr_t)lv_obj_get_user_data(row);
+            const Episode *ep = podcast_model_get_episode_by_id(&g_podcast_app, eid);
+            title = ep ? ep->title : NULL;
+            break;
+        }
+        snprintf(msg, sizeof(msg), "Delete \"%s\"?", title ? title : "");
+    } else {
+        snprintf(msg, sizeof(msg), "Delete %d episodes?", n);
+    }
+
+    lv_obj_t *scr = lv_screen_active();
+    ctx->confirm_sheet = lv_bottom_sheet_create(scr);
+    lv_obj_add_event_cb(ctx->confirm_sheet->overlay, on_confirm_sheet_delete,
+                        LV_EVENT_DELETE, ctx);
+
+    lv_obj_t *content = lv_bottom_sheet_get_content(ctx->confirm_sheet);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(content, 16, 0);
+    lv_obj_set_style_pad_row(content, 12, 0);
+
+    lv_obj_t *label = lv_label_create(content);
+    lv_label_set_text(label, msg);
+    lv_obj_set_style_text_font(label, g_cjk_font, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(0x333333), 0);
+
+    /* Confirm button */
+    lv_obj_t *confirm = lv_button_create(content);
+    lv_obj_set_size(confirm, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(confirm, lv_color_hex(0xE53935), 0);
+    lv_obj_set_style_radius(confirm, 8, 0);
+    lv_obj_set_style_border_width(confirm, 0, 0);
+    lv_obj_set_style_shadow_width(confirm, 0, 0);
+    lv_obj_add_event_cb(confirm, on_delete_confirm, LV_EVENT_CLICKED, ctx);
+    lv_obj_t *cfl = lv_label_create(confirm);
+    lv_label_set_text(cfl, "Confirm");
+    lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(cfl, g_cjk_font, 0);
+    lv_obj_center(cfl);
+
+    /* Cancel button */
+    lv_obj_t *cancel = lv_button_create(content);
+    lv_obj_set_size(cancel, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0xCCCCCC), 0);
+    lv_obj_set_style_radius(cancel, 8, 0);
+    lv_obj_set_style_border_width(cancel, 0, 0);
+    lv_obj_set_style_shadow_width(cancel, 0, 0);
+    lv_obj_add_event_cb(cancel, on_delete_cancel, LV_EVENT_CLICKED, ctx);
+    lv_obj_t *cl = lv_label_create(cancel);
+    lv_label_set_text(cl, "Cancel");
+    lv_obj_set_style_text_color(cl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(cl, g_cjk_font, 0);
+    lv_obj_center(cl);
+}
+
 static void on_sheet_delete(lv_event_t *e) {
     /* lv_bottom_sheet's own delete_event_cb already frees the struct.
      * We only need this callback if we had context to clear. */
@@ -432,15 +556,18 @@ static lv_obj_t *build_action_bar(lv_obj_t *parent, ChannelPageCtx *ctx, int cha
     lv_obj_remove_style_all(sp);
     lv_obj_set_flex_grow(sp, 1);
 
-    /* Download 按钮 */
+    /* Download 按钮 — 本地频道下换成灰色 Delete 按钮 */
     lv_obj_t *da = lv_button_create(bar);
     lv_obj_set_size(da, 80, 28);
-    lv_obj_set_style_bg_color(da, lv_color_hex(0x4CAF50), 0);
+    lv_obj_set_style_bg_color(da,
+        ctx->is_local ? lv_color_hex(0x9E9E9E) : lv_color_hex(0x4CAF50), 0);
     lv_obj_t *dal = lv_label_create(da);
-    lv_label_set_text(dal, "Download");
+    lv_label_set_text(dal, ctx->is_local ? "Delete" : "Download");
     lv_obj_center(dal);
     lv_obj_set_style_text_color(dal, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_add_event_cb(da, on_download_clicked, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_event_cb(da,
+        ctx->is_local ? on_delete_selected_clicked : on_download_clicked,
+        LV_EVENT_CLICKED, ctx);
 
     /* Play 按钮 */
     lv_obj_t *pa = lv_button_create(bar);

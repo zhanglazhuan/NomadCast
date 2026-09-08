@@ -111,6 +111,17 @@ static bool local_model_add(struct PodcastApp *app, int canon, int col,
         for (int i = 0; i < m->local_episode_count; i++)
             if (strcmp(m->local_episodes[i].audio_url, url) == 0) return false;  /* dup */
 
+    /* Also dedup by (channel, title). A recovered orphan is keyed by its local
+     * file path while a normal download is keyed by the CDN url — the same
+     * episode with two different audio_url values — so the url check alone
+     * would let a later cache_local_add insert a duplicate of an episode the
+     * recovery already indexed. */
+    if (ep_title && ep_title[0])
+        for (int i = 0; i < m->local_episode_count; i++)
+            if (m->local_episodes[i].channel_id == canon &&
+                strcmp(m->local_episodes[i].title, ep_title) == 0)
+                return false;   /* dup */
+
     int en = m->local_episode_count + 1;
     Episode *ne = (Episode *)realloc(m->local_episodes, en * sizeof(Episode));
     if (!ne) return false;
@@ -377,11 +388,13 @@ bool cache_local_file_complete(const char *path) {
 }
 
 /* Recover downloaded audio whose .meta bucket was lost (power cut before the
- * directory flush, or an SD card migrated without its index). Scans the
- * downloads tree and re-indexes any channel that has .m4a files but no entry in
- * the local model. Metadata that can't be recovered from a filename (CDN url,
- * duration, collection id) is left empty/zero; playback still works because the
- * local path is re-derived from channel + episode titles. */
+ * directory flush, or an SD card migrated without its index), or whose download
+ * failed after the file was fully written (the task never registered the
+ * episode). Scans the downloads tree and re-indexes any complete .m4a file
+ * missing from the local model — including individual episodes of a channel
+ * that already exists. Metadata that can't be recovered from a filename (CDN
+ * url, duration, collection id) is left empty/zero; playback still works
+ * because the local path is re-derived from channel + episode titles. */
 static void recover_orphaned_downloads(struct PodcastApp *app) {
     PodcastModel *m = app->model;
     if (!m) return;
@@ -399,14 +412,23 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
         if (stat(chdir, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
 
         const char *ch_title = de->d_name;
-        int canon = fnv1a_positive(ch_title);
 
-        /* Skip if the model already knows this channel by title (real
-         * collection_id bucket or a previous recovery) — avoids duplicates. */
-        bool exists = false;
-        for (int i = 0; i < m->local_channel_count; i++)
-            if (strcmp(m->local_channels[i].title, ch_title) == 0) { exists = true; break; }
-        if (exists) continue;
+        /* Recover into the existing channel if one is already registered (a
+         * prior download registered the channel but a later failed download left
+         * an orphaned file for another episode). Reuse its canonical id so the
+         * recovered episodes attach to it instead of forking a duplicate
+         * channel; missing channels still fall back to the title hash. */
+        int canon = 0, col = 0;
+        bool found = false;
+        for (int i = 0; i < m->local_channel_count; i++) {
+            if (strcmp(m->local_channels[i].title, ch_title) == 0) {
+                canon = m->local_channels[i].id;
+                col   = m->local_channels[i].collection_id;
+                found = true;
+                break;
+            }
+        }
+        if (!found) canon = fnv1a_positive(ch_title);
 
         DIR *cd = opendir(chdir);
         if (!cd) continue;
@@ -428,7 +450,9 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
             char ep_title[256];
             snprintf(ep_title, sizeof(ep_title), "%.*s", (int)(len - 4), fde->d_name);
 
-            if (local_model_add(app, canon, 0, ch_title,
+            /* local_model_add dedups by (channel, title), so an episode already
+             * indexed (normal download or a previous recovery) is skipped. */
+            if (local_model_add(app, canon, col, ch_title,
                                 fnv1a_positive(fpath), ep_title, fpath, dur))
                 added_any = true;
         }
@@ -593,4 +617,69 @@ void cache_local_add(struct PodcastApp *app,
                 ts, cid, ch_title ? ch_title : "", eid, ep_title ? ep_title : "", dur);
         fclose(logf);
     }
+}
+
+bool cache_local_remove_episode(struct PodcastApp *app, int episode_id)
+{
+    if (!app || !app->model || episode_id <= 0) return false;
+    PodcastModel *m = app->model;
+
+    int idx = -1;
+    for (int i = 0; i < m->local_episode_count; i++)
+        if (m->local_episodes[i].id == episode_id) { idx = i; break; }
+    if (idx < 0) return false;
+
+    Episode *e = &m->local_episodes[idx];
+    int canon = e->channel_id;
+
+    const Channel *ch = NULL;
+    for (int i = 0; i < m->local_channel_count; i++)
+        if (m->local_channels[i].id == canon) { ch = &m->local_channels[i]; break; }
+
+    /* Delete the audio file (best-effort). */
+    if (ch) {
+        char audio_path[2048];
+        local_audio_path(ch->title, e->title, audio_path, sizeof(audio_path));
+        remove(audio_path);
+        printf("[INF] remove_episode: %s\n", audio_path); fflush(stdout);
+    }
+
+    /* Drop the episode from the in-RAM model. */
+    memmove(&m->local_episodes[idx], &m->local_episodes[idx + 1],
+            (m->local_episode_count - idx - 1) * sizeof(Episode));
+    m->local_episode_count--;
+
+    /* Decrement the owning channel's episode count; drop the channel (and its
+     * metadata bucket + audio directory) once it has no episodes left. */
+    bool channel_removed = false;
+    for (int i = 0; i < m->local_channel_count; i++) {
+        if (m->local_channels[i].id != canon) continue;
+        m->local_channels[i].episode_count--;
+        if (m->local_channels[i].episode_count <= 0) {
+            char meta[320];
+            channel_file_path(meta, sizeof(meta), canon);
+            remove(meta);
+
+            char ch_dir[1536];
+            char ch_safe[256];
+            snprintf(ch_safe, sizeof(ch_safe), "%s", m->local_channels[i].title);
+            for (char *p = ch_safe; *p; p++)
+                if (strchr("\\/:*?\"<>|", *p)) *p = '_';
+            snprintf(ch_dir, sizeof(ch_dir), DL_BASE_PATH "/%s", ch_safe);
+            remove(ch_dir);   /* best-effort; FATFS fails if dir not empty */
+
+            memmove(&m->local_channels[i], &m->local_channels[i + 1],
+                    (m->local_channel_count - i - 1) * sizeof(Channel));
+            m->local_channel_count--;
+            channel_removed = true;
+        }
+        break;
+    }
+
+    /* Persist the reduced bucket (or leave the already-deleted bucket). */
+    if (!channel_removed)
+        local_write_channel(app, canon);
+
+    m->local_has_content = (m->local_channel_count > 0);
+    return true;
 }

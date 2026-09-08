@@ -286,6 +286,18 @@ bool http_download_to_file(const char *url, const char *file_path,
             continue;
         }
 
+        if (status == 416) {
+            /* Range Not Satisfiable: the resume offset is at/after EOF, so the
+             * local file already covers the whole remote file (or it shrank).
+             * Restart from byte 0 rather than failing the task. */
+            ESP_LOGW(TAG, "dl: HTTP 416 (range past EOF) — restarting from byte 0");
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            unlink(file_path);
+            snprintf(current_url, sizeof(current_url), "%s", url);
+            redirect = -1;   /* loop ++ makes it 0 → re-issue fresh, no Range */
+            continue;
+        }
         if (status != 200 && status != 206) {
             ESP_LOGE(TAG, "dl: HTTP %d for %s", status, current_url);
             esp_http_client_close(client);
