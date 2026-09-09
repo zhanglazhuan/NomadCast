@@ -48,6 +48,14 @@ static void on_search_bar_clicked(lv_event_t* e) {
 
 static void on_card_clicked(lv_event_t* e) {
     lv_obj_t* card = lv_event_get_current_target_obj(e);
+
+    /* A swipe (scroll gesture) must not fire the tap handler. At the scroll
+     * edge LVGL can't start a scroll (scroll_obj stays NULL), so the release is
+     * still reported as SHORT_CLICKED; the gesture direction disambiguates a
+     * real tap from a swipe in any direction (incl. left-swipe-to-delete). */
+    lv_indev_t *indev = lv_indev_active();
+    if (indev && lv_indev_get_gesture_dir(indev) != LV_DIR_NONE) return;
+
     int channel_id = (int)(uintptr_t)lv_obj_get_user_data(card);
     printf("[INF] Local card clicked, channel_id=%d\n", channel_id); fflush(stdout);
     int* id_ptr = malloc(sizeof(int));

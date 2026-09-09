@@ -84,6 +84,12 @@ static void on_checkbox_changed(lv_event_t *e) {
 
 static void on_track_clicked(lv_event_t *e) {
     lv_obj_t *row = lv_event_get_current_target_obj(e);
+
+    /* A swipe (scroll gesture) must not fire the tap handler — see the same
+     * check in view_local.c/on_card_clicked. */
+    lv_indev_t *indev = lv_indev_active();
+    if (indev && lv_indev_get_gesture_dir(indev) != LV_DIR_NONE) return;
+
     int track_id = (int)(uintptr_t)lv_obj_get_user_data(row);
 
     /* Remote M4A can't stream (server transcode is disabled) — it must be
