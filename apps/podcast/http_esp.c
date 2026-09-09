@@ -13,6 +13,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "hal.h"
+#include "lang.h"
 
 static const char *TAG = "http_esp";
 
@@ -50,7 +51,7 @@ char *http_get_sync_timeout(const char *url, int *out_status, int *out_len, int 
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
-        snprintf(g_http_last_error, sizeof(g_http_last_error), "Failed to init HTTP client");
+        snprintf(g_http_last_error, sizeof(g_http_last_error), "%s", tr(STR_HTTP_INIT_FAILED));
         ESP_LOGE(TAG, "%s", g_http_last_error);
         if (out_status) *out_status = 0;
         if (out_len)    *out_len = 0;
@@ -59,7 +60,7 @@ char *http_get_sync_timeout(const char *url, int *out_status, int *out_len, int 
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
-        snprintf(g_http_last_error, sizeof(g_http_last_error), "Connect failed: %s", esp_err_to_name(err));
+        snprintf(g_http_last_error, sizeof(g_http_last_error), tr(STR_CONNECT_FAILED), esp_err_to_name(err));
         ESP_LOGE(TAG, "Open failed: %s", esp_err_to_name(err));
         if (out_status) *out_status = 0;
         if (out_len)    *out_len = 0;
@@ -87,7 +88,7 @@ char *http_get_sync_timeout(const char *url, int *out_status, int *out_len, int 
     int buf_cap = (content_len > 0) ? content_len + 1 : 16384;
     char *body = (char *)heap_caps_malloc(buf_cap, MALLOC_CAP_SPIRAM);
     if (!body) {
-        snprintf(g_http_last_error, sizeof(g_http_last_error), "Out of memory (%d bytes)", buf_cap);
+        snprintf(g_http_last_error, sizeof(g_http_last_error), tr(STR_OUT_OF_MEMORY), buf_cap);
         ESP_LOGE(TAG, "malloc(%d) failed", buf_cap);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);

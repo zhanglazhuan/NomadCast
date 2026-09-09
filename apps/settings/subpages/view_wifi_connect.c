@@ -12,11 +12,13 @@
 #include "wifi_cred.h"
 #include "lv_page.h"
 #include "hal.h"
+#include "lang.h"
 #include "esp_log.h"
 
 static const char *TAG = "wifi_connect";
 
 extern SettingsApp g_settings_app;
+extern const lv_font_t *g_cjk_font;
 
 /* ── 上下文 ────────────────────────────────────────────────────────────────── */
 
@@ -149,7 +151,7 @@ static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_dat
         strncpy(ctx->ssid, (const char*)app->view->page_nav.nav_ctx, sizeof(ctx->ssid) - 1);
     }
 
-    Page page = lv_page_create(ctx->ssid[0] ? ctx->ssid : "Connect",
+    Page page = lv_page_create(ctx->ssid[0] ? ctx->ssid : tr(STR_CONNECT),
                                true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_add_event_cb(page.screen, ctx_cleanup, LV_EVENT_DELETE, ctx);
 
@@ -161,14 +163,14 @@ static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_dat
 
     /* 密码输入 */
     lv_obj_t* lb = lv_label_create(cont);
-    lv_label_set_text(lb, "Enter Password");
-    lv_obj_set_style_text_font(lb, &lv_font_montserrat_14, 0);
+    lv_label_set_text(lb, tr(STR_ENTER_PASSWORD));
+    lv_obj_set_style_text_font(lb, g_cjk_font, 0);
     lv_obj_set_style_text_color(lb, lv_color_hex(0x666666), 0);
 
     lv_obj_t* ta = lv_textarea_create(cont);
     lv_obj_set_size(ta, LV_PCT(100), 40);
     lv_textarea_set_password_mode(ta, true);
-    lv_textarea_set_placeholder_text(ta, "Password");
+    lv_textarea_set_placeholder_text(ta, tr(STR_PASSWORD));
     lv_textarea_set_one_line(ta, true);
     ctx->pwd_ta = ta;
     lv_obj_add_event_cb(ta, on_ta_focused, LV_EVENT_FOCUSED, ctx);
@@ -176,7 +178,7 @@ static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_dat
 
     /* Show password checkbox */
     lv_obj_t* cb = lv_checkbox_create(cont);
-    lv_checkbox_set_text(cb, "Show Password");
+    lv_checkbox_set_text(cb, tr(STR_SHOW_PASSWORD));
     lv_obj_set_style_pad_all(cb, 0, 0);
     lv_obj_add_event_cb(cb, on_show_pwd_changed, LV_EVENT_VALUE_CHANGED, ctx);
 
@@ -185,7 +187,7 @@ static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_dat
     lv_obj_set_size(btn, LV_PCT(100), 40);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x4CAF50), 0);
     lv_obj_t* bl = lv_label_create(btn);
-    lv_label_set_text(bl, "Connect");
+    lv_label_set_text(bl, tr(STR_CONNECT));
     lv_obj_center(bl);
     lv_obj_set_style_text_color(bl, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(btn, on_connect_clicked, LV_EVENT_CLICKED, ctx);

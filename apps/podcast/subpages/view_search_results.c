@@ -11,6 +11,7 @@
 #include "../model.h"
 #include "../controller.h"
 #include "lv_page.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -50,7 +51,7 @@ static void build_results_content(lv_obj_t *parent) {
 
     if (sr->channel_count == 0 && sr->episode_count == 0) {
         lv_obj_t *empty = lv_label_create(parent);
-        lv_label_set_text(empty, "No results found");
+        lv_label_set_text(empty, tr(STR_NO_RESULTS_FOUND));
         lv_obj_center(empty);
         lv_obj_set_style_text_color(empty, lv_color_hex(0x999999), 0);
         return;
@@ -59,7 +60,7 @@ static void build_results_content(lv_obj_t *parent) {
     /* Albums section */
     if (sr->channel_count > 0) {
         char buf[64];
-        snprintf(buf, sizeof(buf), "Channels (%d)", sr->channel_count);
+        snprintf(buf, sizeof(buf), tr(STR_CHANNELS_N), sr->channel_count);
         lv_obj_t *al = lv_label_create(parent);
         lv_label_set_text(al, buf);
         lv_obj_set_style_text_font(al, g_cjk_font, 0);
@@ -88,7 +89,7 @@ static void build_results_content(lv_obj_t *parent) {
     /* Tracks section */
     if (sr->episode_count > 0) {
         char buf[64];
-        snprintf(buf, sizeof(buf), "Episodes (%d)", sr->episode_count);
+        snprintf(buf, sizeof(buf), tr(STR_EPISODES_N), sr->episode_count);
         lv_obj_t *tl = lv_label_create(parent);
         lv_label_set_text(tl, buf);
         lv_obj_set_style_text_font(tl, g_cjk_font, 0);
@@ -141,7 +142,7 @@ static lv_obj_t *build_search_results_page(struct PodcastApp *app, void *user_da
         app->view->page_nav.nav_ctx = NULL;
     }
 
-    Page page = lv_page_create("Search Results", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_SEARCH_RESULTS), true, page_navigator_navigate_back, &app->view->page_nav);
 
     SearchResultsPage *sp = (SearchResultsPage *)calloc(1, sizeof(SearchResultsPage));
     app->view->page_nav.nav_ctx = sp;

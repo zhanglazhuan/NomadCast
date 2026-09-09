@@ -1,5 +1,13 @@
 menu "NomadCast"
 
+    config NOMADCAST_DEFAULT_LANGUAGE
+        int "Default UI language (0=Simplified Chinese, 1=English)"
+        default 0
+        help
+            Build-time default UI language. 0 = Simplified Chinese (domestic
+            build), 1 = English (overseas build). The user can override this at
+            runtime in Settings -> General -> Language, which persists to NVS.
+
     config NOMADCAST_USB_MSC
         bool "USB Mass Storage (SD card as USB disk)"
         default n

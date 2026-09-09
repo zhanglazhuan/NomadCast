@@ -9,23 +9,25 @@
 #include "../view.h"
 #include "../app.h"
 #include "lv_page.h"
+#include "lang.h"
 
 extern SettingsApp g_settings_app;
 extern const lv_image_dsc_t ic_info;
+extern const lv_font_t *g_cjk_font;
 
 /* ── 设置项数据 ────────────────────────────────────────────────────────────── */
 
 static const struct {
-    const char* title;
+    int         str_key;
     const void* icon;        /* string for LV_SYMBOL_*, lv_image_dsc_t* for images */
     int         page_id;
     bool        is_image;
 } setting_items[] = {
-    {"General",  LV_SYMBOL_SETTINGS, SETTINGS_PAGE_GENERAL, false},
-    {"WIFI",     LV_SYMBOL_WIFI,     SETTINGS_PAGE_WIFI,     false},
-    {"Storage",  LV_SYMBOL_SD_CARD,  SETTINGS_PAGE_STORAGE,  false},
-    {"Update",   LV_SYMBOL_REFRESH,  SETTINGS_PAGE_UPDATE,   false},
-    {"About",    &ic_info,           SETTINGS_PAGE_ABOUT,    true },
+    {STR_GENERAL, LV_SYMBOL_SETTINGS, SETTINGS_PAGE_GENERAL, false},
+    {STR_WIFI,    LV_SYMBOL_WIFI,     SETTINGS_PAGE_WIFI,     false},
+    {STR_STORAGE, LV_SYMBOL_SD_CARD,  SETTINGS_PAGE_STORAGE,  false},
+    {STR_UPDATE,  LV_SYMBOL_REFRESH,  SETTINGS_PAGE_UPDATE,   false},
+    {STR_ABOUT,   &ic_info,           SETTINGS_PAGE_ABOUT,    true },
 };
 
 static void on_item_clicked(lv_event_t* e) {
@@ -71,9 +73,9 @@ static lv_obj_t* build_main_page(struct SettingsApp* app, void* user_data) {
         lv_obj_align(icon, LV_ALIGN_LEFT_MID, 16, 0);
 
         lv_obj_t* title = lv_label_create(card);
-        lv_label_set_text(title, setting_items[i].title);
+        lv_label_set_text(title, tr(setting_items[i].str_key));
         lv_obj_align(title, LV_ALIGN_LEFT_MID, 52, 0);
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(title, g_cjk_font, 0);
 
         lv_obj_t* arrow = lv_label_create(card);
         lv_label_set_text(arrow, LV_SYMBOL_RIGHT);

@@ -10,8 +10,10 @@
 #include "../app.h"
 #include "../model.h"
 #include "lv_page.h"
+#include "lang.h"
 
 extern SettingsApp g_settings_app;
+extern const lv_font_t *g_cjk_font;
 
 /* ── 清理按钮回调 ──────────────────────────────────────────────────────────── */
 
@@ -26,7 +28,7 @@ static void on_clean_clicked(lv_event_t* e) {
 static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
     (void)user_data;
 
-    Page page = lv_page_create("Storage", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_STORAGE), true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_t* cont = page.container;
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 16, 0);
@@ -38,8 +40,8 @@ static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
     /* ── No SD card ── */
     if (used < 0 || total <= 0) {
         lv_obj_t* lb = lv_label_create(cont);
-        lv_label_set_text(lb, "No SD Card Insert ~");
-        lv_obj_set_style_text_font(lb, &lv_font_montserrat_16, 0);
+        lv_label_set_text(lb, tr(STR_NO_SD_CARD));
+        lv_obj_set_style_text_font(lb, g_cjk_font, 0);
         lv_obj_set_style_text_color(lb, lv_color_hex(0x999999), 0);
         lv_obj_align(lb, LV_ALIGN_CENTER, 0, 0);
         return page.screen;
@@ -47,8 +49,8 @@ static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
 
     /* ── 标题 ── */
     lv_obj_t* lb_title = lv_label_create(cont);
-    lv_label_set_text(lb_title, "Storage Usage");
-    lv_obj_set_style_text_font(lb_title, &lv_font_montserrat_16, 0);
+    lv_label_set_text(lb_title, tr(STR_STORAGE_USAGE));
+    lv_obj_set_style_text_font(lb_title, g_cjk_font, 0);
     lv_obj_set_style_text_color(lb_title, lv_color_hex(0x333333), 0);
 
     /* ── 进度条 ── */
@@ -77,10 +79,10 @@ static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_size(btn, LV_PCT(100), 40);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0xF44336), 0);
     lv_obj_t* lb_btn = lv_label_create(btn);
-    lv_label_set_text(lb_btn, "Clean Storage");
+    lv_label_set_text(lb_btn, tr(STR_CLEAN_STORAGE));
     lv_obj_center(lb_btn);
     lv_obj_set_style_text_color(lb_btn, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lb_btn, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lb_btn, g_cjk_font, 0);
     lv_obj_add_event_cb(btn, on_clean_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
 

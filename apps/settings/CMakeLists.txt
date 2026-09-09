@@ -6,5 +6,5 @@ idf_component_register(
         "subpages/view_storage.c" "subpages/view_update.c"
         "subpages/view_about.c" "subpages/view_ota_status.c"
     INCLUDE_DIRS "." "subpages"
-    REQUIRES lvgl uilv app_manager sleep_monitor flash_store clock ota esp_wifi esp_netif esp_event nvs_flash events fatfs
+    REQUIRES lvgl uilv app_manager sleep_monitor flash_store clock lang ota esp_wifi esp_netif esp_event nvs_flash events fatfs
 )

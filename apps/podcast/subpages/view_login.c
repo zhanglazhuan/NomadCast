@@ -17,6 +17,7 @@
 #include "../controller.h"
 #include "lv_page.h"
 #include "lv_toast.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -192,7 +193,7 @@ static lv_obj_t* build_login_page(struct PodcastApp* app, void* user_data) {
     login_mode_t mode = (login_mode_t)(uintptr_t)user_data;
     bool is_register = (mode == LOGIN_MODE_REGISTER);
 
-    Page page = lv_page_create(is_register ? "Register" : "Login",
+    Page page = lv_page_create(is_register ? tr(STR_REGISTER) : tr(STR_LOGIN),
                                true, page_navigator_navigate_back,
                                &app->view->page_nav);
 
@@ -210,25 +211,25 @@ static lv_obj_t* build_login_page(struct PodcastApp* app, void* user_data) {
 
     /* Name */
     lv_obj_t* nl = lv_label_create(page.container);
-    lv_label_set_text(nl, "Name");
+    lv_label_set_text(nl, tr(STR_NAME));
     lv_obj_set_style_text_font(nl, g_cjk_font, 0);
     lv_obj_set_style_text_color(nl, lv_color_hex(0x333333), 0);
-    ctx->name_input = create_text_input(page.container, "Enter your name", false, ctx);
+    ctx->name_input = create_text_input(page.container, tr(STR_ENTER_YOUR_NAME), false, ctx);
 
     /* Password */
     lv_obj_t* pl = lv_label_create(page.container);
-    lv_label_set_text(pl, "Password");
+    lv_label_set_text(pl, tr(STR_PASSWORD));
     lv_obj_set_style_text_font(pl, g_cjk_font, 0);
     lv_obj_set_style_text_color(pl, lv_color_hex(0x333333), 0);
-    ctx->pwd_input = create_text_input(page.container, "Enter password", true, ctx);
+    ctx->pwd_input = create_text_input(page.container, tr(STR_ENTER_PASSWORD), true, ctx);
 
     /* Confirm Password — visible only in REGISTER mode */
     lv_obj_t* cpl = lv_label_create(page.container);
-    lv_label_set_text(cpl, "Confirm Password");
+    lv_label_set_text(cpl, tr(STR_CONFIRM_PASSWORD));
     lv_obj_set_style_text_font(cpl, g_cjk_font, 0);
     lv_obj_set_style_text_color(cpl, lv_color_hex(0x333333), 0);
     ctx->cpwd_label = cpl;
-    ctx->cpwd_input = create_text_input(page.container, "Re-enter password", true, ctx);
+    ctx->cpwd_input = create_text_input(page.container, tr(STR_REENTER_PASSWORD), true, ctx);
     if (!is_register) {
         lv_obj_add_flag(cpl,               LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(ctx->cpwd_input,   LV_OBJ_FLAG_HIDDEN);
@@ -236,7 +237,7 @@ static lv_obj_t* build_login_page(struct PodcastApp* app, void* user_data) {
 
     /* 协议勾选 */
     ctx->agree_cb = lv_checkbox_create(page.container);
-    lv_checkbox_set_text(ctx->agree_cb, "I agree to the Terms of Service");
+    lv_checkbox_set_text(ctx->agree_cb, tr(STR_AGREE_TERMS));
     lv_obj_set_style_pad_all(ctx->agree_cb, 0, 0);
 
     /* Login 按钮 */
@@ -248,7 +249,7 @@ static lv_obj_t* build_login_page(struct PodcastApp* app, void* user_data) {
     lv_obj_add_event_cb(login_btn, on_login_btn_clicked, LV_EVENT_CLICKED, ctx);
 
     lv_obj_t* login_label = lv_label_create(login_btn);
-    lv_label_set_text(login_label, "Login");
+    lv_label_set_text(login_label, tr(STR_LOGIN));
     lv_obj_center(login_label);
     lv_obj_set_style_text_color(login_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(login_label, g_cjk_font, 0);

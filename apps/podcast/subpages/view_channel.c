@@ -16,6 +16,7 @@
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
 #include "lv_toast.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_info;
@@ -96,7 +97,7 @@ static void on_track_clicked(lv_event_t *e) {
      * downloaded first. Stay on this page and toast instead of jumping to
      * the player page. */
     if (!podcast_controller_episode_playable(&g_podcast_app, track_id)) {
-        lv_toast_show("M4A 需下载后播放", 2000);
+        lv_toast_show(tr(STR_M4A_NEED_DOWNLOAD), 2000);
         return;
     }
 
@@ -273,7 +274,7 @@ static void show_loading_and_poll(ChannelPageCtx *ctx) {
     lv_obj_clean(ctx->list_container);
 
     ctx->loading_label = lv_label_create(ctx->list_container);
-    lv_label_set_text(ctx->loading_label, "Loading...");
+    lv_label_set_text(ctx->loading_label, tr(STR_LOADING));
     lv_obj_set_width(ctx->loading_label, LV_PCT(100));
     lv_obj_set_style_text_align(ctx->loading_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_margin_top(ctx->loading_label, 16, 0);
@@ -303,7 +304,7 @@ static void page_poll_cb(lv_timer_t *timer) {
         lv_obj_t *empty = lv_label_create(ctx->list_container);
         const char *err = (g_rss_result() && g_rss_result()->error[0])
                           ? g_rss_result()->error
-                          : "Failed to load episodes.\nCheck network connection.";
+                          : tr(STR_FAILED_LOAD_EPISODES);
         lv_label_set_text(empty, err);
         lv_obj_set_width(empty, LV_PCT(100));
         lv_obj_set_style_text_color(empty, lv_color_hex(0x999999), 0);
@@ -317,7 +318,7 @@ static void on_download_clicked(lv_event_t *e) {
     if (!ctx) return;
     int cid = ctx->channel_id;
     const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, cid);
-    const char *ch_name = ch ? ch->title : "Unknown";
+    const char *ch_name = ch ? ch->title : tr(STR_UNKNOWN);
     int submitted = 0;
     for (int i = 0; i < ctx->episode_count; i++) {
         if (!ctx->track_checked[i] || !ctx->track_cbs[i]) continue;
@@ -330,7 +331,7 @@ static void on_download_clicked(lv_event_t *e) {
         }
     }
     if (submitted > 0)
-        lv_toast_show("Download queued", 2000);
+        lv_toast_show(tr(STR_DOWNLOAD_QUEUED), 2000);
 }
 
 /* Play selected episodes: collect checked episodes, build a queue, and navigate
@@ -434,9 +435,9 @@ static void on_delete_selected_clicked(lv_event_t *e) {
             title = ep ? ep->title : NULL;
             break;
         }
-        snprintf(msg, sizeof(msg), "Delete \"%s\"?", title ? title : "");
+        snprintf(msg, sizeof(msg), tr(STR_DELETE_QUOTED), title ? title : "");
     } else {
-        snprintf(msg, sizeof(msg), "Delete %d episodes?", n);
+        snprintf(msg, sizeof(msg), tr(STR_DELETE_EPISODES), n);
     }
 
     lv_obj_t *scr = lv_screen_active();
@@ -463,7 +464,7 @@ static void on_delete_selected_clicked(lv_event_t *e) {
     lv_obj_set_style_shadow_width(confirm, 0, 0);
     lv_obj_add_event_cb(confirm, on_delete_confirm, LV_EVENT_CLICKED, ctx);
     lv_obj_t *cfl = lv_label_create(confirm);
-    lv_label_set_text(cfl, "Confirm");
+    lv_label_set_text(cfl, tr(STR_CONFIRM));
     lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(cfl, g_cjk_font, 0);
     lv_obj_center(cfl);
@@ -477,7 +478,7 @@ static void on_delete_selected_clicked(lv_event_t *e) {
     lv_obj_set_style_shadow_width(cancel, 0, 0);
     lv_obj_add_event_cb(cancel, on_delete_cancel, LV_EVENT_CLICKED, ctx);
     lv_obj_t *cl = lv_label_create(cancel);
-    lv_label_set_text(cl, "Cancel");
+    lv_label_set_text(cl, tr(STR_CANCEL));
     lv_obj_set_style_text_color(cl, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(cl, g_cjk_font, 0);
     lv_obj_center(cl);
@@ -568,7 +569,7 @@ static lv_obj_t *build_action_bar(lv_obj_t *parent, ChannelPageCtx *ctx, int cha
     lv_obj_set_style_bg_color(da,
         ctx->is_local ? lv_color_hex(0x9E9E9E) : lv_color_hex(0x4CAF50), 0);
     lv_obj_t *dal = lv_label_create(da);
-    lv_label_set_text(dal, ctx->is_local ? "Delete" : "Download");
+    lv_label_set_text(dal, ctx->is_local ? tr(STR_DELETE) : tr(STR_DOWNLOAD));
     lv_obj_center(dal);
     lv_obj_set_style_text_color(dal, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(da,
@@ -580,7 +581,7 @@ static lv_obj_t *build_action_bar(lv_obj_t *parent, ChannelPageCtx *ctx, int cha
     lv_obj_set_size(pa, 80, 28);
     lv_obj_set_style_bg_color(pa, lv_color_hex(0x1976D2), 0);
     lv_obj_t *pal = lv_label_create(pa);
-    lv_label_set_text(pal, "Play");
+    lv_label_set_text(pal, tr(STR_PLAY));
     lv_obj_center(pal);
     lv_obj_set_style_text_color(pal, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(pa, on_play_selected_clicked, LV_EVENT_CLICKED, ctx);
@@ -618,7 +619,7 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     if (!channel) {
         Page page = lv_page_create(NULL, true, page_navigator_navigate_back, &app->view->page_nav);
         lv_obj_t *l = lv_label_create(page.container);
-        lv_label_set_text(l, "Channel not found"); lv_obj_center(l);
+        lv_label_set_text(l, tr(STR_CHANNEL_NOT_FOUND)); lv_obj_center(l);
         return page.screen;
     }
 
@@ -661,7 +662,7 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     lv_obj_add_event_cb(sw, on_select_all_switch, LV_EVENT_VALUE_CHANGED, ctx);
 
     lv_obj_t *sw_label = lv_label_create(lh);
-    lv_label_set_text(sw_label, "ALL");
+    lv_label_set_text(sw_label, tr(STR_ALL));
     lv_obj_align(sw_label, LV_ALIGN_LEFT_MID, 48, 0);
     lv_obj_set_style_text_font(sw_label, g_cjk_font, 0);
     lv_obj_set_style_text_color(sw_label, lv_color_hex(0x666666), 0);

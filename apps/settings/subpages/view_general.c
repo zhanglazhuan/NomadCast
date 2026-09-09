@@ -16,6 +16,7 @@
 #include "lv_bottom_sheet.h"
 #include "sleep_monitor.h"
 #include "flash_store.h"
+#include "lang.h"
 #include "app_manager.h"
 #include "esp_system.h"
 #include "esp_log.h"
@@ -23,6 +24,7 @@
 #include "freertos/task.h"
 
 extern SettingsApp g_settings_app;
+extern const lv_font_t *g_cjk_font;
 static const char *TAG = "settings_reset";
 static lv_bottom_sheet_t *s_factory_reset_sheet = NULL;
 
@@ -77,6 +79,21 @@ static void on_language_changed(lv_event_t* e) {
     lv_obj_t* dd = lv_event_get_target(e);
     int sel = lv_dropdown_get_selected(dd);
     settings_model_set_language(&g_settings_app, sel);
+    /* Rebuild the General page in-place so the new language applies immediately
+     * (navigate_to swaps the screen and async-deletes the old one, without
+     * touching the back-stack). */
+    page_navigator_navigate_to(&g_settings_app.view->page_nav, &g_settings_app,
+                               SETTINGS_PAGE_GENERAL, NULL);
+}
+
+/* ── 辅助: 下拉框统一挂 CJK 字体 ─────────────────────────────────────────────
+ * 下拉列表 lv_dropdown_get_list() 通常挂在 lv_layer_top()，不继承 page.screen
+ * 的 CJK 字体；翻译后的中文选项（时区/睡眠/关机/语言）会显示成方框，故按钮与
+ * 列表都显式指定 g_cjk_font。 */
+static void dropdown_set_cjk(lv_obj_t* dd) {
+    lv_obj_set_style_text_font(dd, g_cjk_font, 0);
+    lv_obj_t* list = lv_dropdown_get_list(dd);
+    if (list) lv_obj_set_style_text_font(list, g_cjk_font, 0);
 }
 
 /* ── 辅助: 创建一个设置行 ────────────────────────────────────────────────── */
@@ -93,7 +110,7 @@ static lv_obj_t* create_setting_row(lv_obj_t* parent, const char* label) {
     if (label) {
         lv_obj_t* lb = lv_label_create(row);
         lv_label_set_text(lb, label);
-        lv_obj_set_style_text_font(lb, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lb, g_cjk_font, 0);
         lv_obj_set_style_text_color(lb, lv_color_hex(0x666666), 0);
         lv_obj_set_style_margin_bottom(lb, 4, 0);
     }
@@ -174,19 +191,19 @@ static void on_factory_reset_clicked(lv_event_t *e)
     lv_obj_set_style_pad_row(content, 10, 0);
 
     lv_obj_t *title = lv_label_create(content);
-    lv_label_set_text(title, "Factory Reset");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title, tr(STR_FACTORY_RESET));
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
 
     lv_obj_t *warn = lv_label_create(content);
-    lv_label_set_text(warn, "Erase all settings and downloaded data?\nThe device will restart.");
-    lv_obj_set_style_text_font(warn, &lv_font_montserrat_14, 0);
+    lv_label_set_text(warn, tr(STR_FACTORY_RESET_WARN));
+    lv_obj_set_style_text_font(warn, g_cjk_font, 0);
 
     lv_obj_t *confirm = lv_button_create(content);
     lv_obj_set_size(confirm, LV_PCT(100), 44);
     lv_obj_set_style_bg_color(confirm, lv_color_hex(0xF44336), 0);
     lv_obj_add_event_cb(confirm, on_factory_reset_confirm, LV_EVENT_CLICKED, NULL);
     lv_obj_t *clbl = lv_label_create(confirm);
-    lv_label_set_text(clbl, "Erase and Restart");
+    lv_label_set_text(clbl, tr(STR_ERASE_AND_RESTART));
     lv_obj_center(clbl);
     lv_obj_set_style_text_color(clbl, lv_color_hex(0xFFFFFF), 0);
 
@@ -194,7 +211,7 @@ static void on_factory_reset_clicked(lv_event_t *e)
     lv_obj_set_size(cancel, LV_PCT(100), 44);
     lv_obj_add_event_cb(cancel, on_factory_reset_cancel, LV_EVENT_CLICKED, NULL);
     lv_obj_t *x = lv_label_create(cancel);
-    lv_label_set_text(x, "Cancel");
+    lv_label_set_text(x, tr(STR_CANCEL));
     lv_obj_center(x);
 }
 
@@ -203,7 +220,7 @@ static void on_factory_reset_clicked(lv_event_t *e)
 static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     (void)user_data;
 
-    Page page = lv_page_create("General", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_GENERAL), true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_t* cont = page.container;
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_hor(cont, 12, 0);
@@ -215,23 +232,28 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     bool fmt24 = settings_model_get_time_format_24h(app);
 
     /* ── 时区 ── */
-    lv_obj_t* row_tz = create_setting_row(cont, "Timezone");
+    lv_obj_t* row_tz = create_setting_row(cont, tr(STR_TIMEZONE));
     lv_obj_t* dd_tz = lv_dropdown_create(row_tz);
-    lv_dropdown_set_options(dd_tz, settings_timezone_options);
+    char tz_opts[128];
+    snprintf(tz_opts, sizeof(tz_opts), "%s\n%s\n%s\n%s",
+             tr(STR_TZ_BEIJING), tr(STR_TZ_LONDON), tr(STR_TZ_NEW_YORK), tr(STR_TZ_TOKYO));
+    lv_dropdown_set_options(dd_tz, tz_opts);
     lv_dropdown_set_selected(dd_tz, tz);
     lv_obj_set_width(dd_tz, LV_PCT(100));
+    dropdown_set_cjk(dd_tz);
     lv_obj_add_event_cb(dd_tz, on_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 语言 ── */
-    lv_obj_t* row_lang = create_setting_row(cont, "Language");
+    lv_obj_t* row_lang = create_setting_row(cont, tr(STR_LANGUAGE));
     lv_obj_t* dd_lang = lv_dropdown_create(row_lang);
     lv_dropdown_set_options(dd_lang, settings_language_options);
     lv_dropdown_set_selected(dd_lang, lang);
     lv_obj_set_width(dd_lang, LV_PCT(100));
+    dropdown_set_cjk(dd_lang);
     lv_obj_add_event_cb(dd_lang, on_language_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 时间格式 ── */
-    lv_obj_t* row_fmt = create_setting_row(cont, "24-Hour Format");
+    lv_obj_t* row_fmt = create_setting_row(cont, tr(STR_24H_FORMAT));
     lv_obj_t* sw_fmt = lv_switch_create(row_fmt);
     lv_obj_set_height(sw_fmt, 24);
     if (fmt24) lv_obj_add_state(sw_fmt, LV_STATE_CHECKED);
@@ -244,11 +266,12 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
         if (_sleep_timeout_values[i] == cur_timeout) { dd_idx = i; break; }
     }
 
-    lv_obj_t* row_sleep = create_setting_row(cont, "Sleep Timeout");
+    lv_obj_t* row_sleep = create_setting_row(cont, tr(STR_SLEEP_TIMEOUT));
     lv_obj_t* dd_sleep = lv_dropdown_create(row_sleep);
-    lv_dropdown_set_options(dd_sleep, "Never\n1 Minute\n2 Minutes\n5 Minutes\n10 Minutes\n15 Minutes\n30 Minutes\n60 Minutes");
+    lv_dropdown_set_options(dd_sleep, tr(STR_SLEEP_OPTIONS));
     lv_dropdown_set_selected(dd_sleep, dd_idx);
     lv_obj_set_width(dd_sleep, LV_PCT(100));
+    dropdown_set_cjk(dd_sleep);
     lv_obj_add_event_cb(dd_sleep, on_sleep_timeout_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 自动关机超时 ── */
@@ -258,11 +281,12 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
         if (_power_off_values[i] == cur_power_off) { po_idx = i; break; }
     }
 
-    lv_obj_t* row_power = create_setting_row(cont, "Auto Power Off");
+    lv_obj_t* row_power = create_setting_row(cont, tr(STR_AUTO_POWER_OFF));
     lv_obj_t* dd_power = lv_dropdown_create(row_power);
-    lv_dropdown_set_options(dd_power, "Never\n5 Minutes\n10 Minutes\n15 Minutes\n30 Minutes\n60 Minutes");
+    lv_dropdown_set_options(dd_power, tr(STR_POWER_OPTIONS));
     lv_dropdown_set_selected(dd_power, po_idx);
     lv_obj_set_width(dd_power, LV_PCT(100));
+    dropdown_set_cjk(dd_power);
     lv_obj_add_event_cb(dd_power, on_power_off_timeout_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 恢复出厂设置 ── */
@@ -273,9 +297,9 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_style_bg_color(btn_reset, lv_color_hex(0xF44336), 0);
     lv_obj_set_style_radius(btn_reset, 8, 0);
     lv_obj_t *lbl_reset = lv_label_create(btn_reset);
-    lv_label_set_text(lbl_reset, "Factory Reset");
+    lv_label_set_text(lbl_reset, tr(STR_FACTORY_RESET));
     lv_obj_set_style_text_color(lbl_reset, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lbl_reset, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl_reset, g_cjk_font, 0);
     lv_obj_center(lbl_reset);
     lv_obj_add_event_cb(btn_reset, on_factory_reset_clicked, LV_EVENT_CLICKED, NULL);
 

@@ -12,6 +12,7 @@ static const char *TAG = "settings";
 #include "flash_store.h"
 #include "sleep_monitor.h"
 #include "clock.h"
+#include "lang.h"
 
 /* The scan result (hal_wifi_ap_t[]) is cast straight to WifiNetwork* below.
  * Guard the assumption at compile time — a size mismatch silently garbles the
@@ -39,7 +40,8 @@ void settings_model_init(struct SettingsApp* app) {
 
     // Defaults (overridden by NVS if saved values exist)
     app->model->timezone_idx = flash_get_i32("settings", "tz", 0);
-    app->model->language_idx = flash_get_i32("settings", "lang", 0);
+    app->model->language_idx = flash_get_i32("settings", "lang", CONFIG_NOMADCAST_DEFAULT_LANGUAGE);
+    lang_set((lang_t)app->model->language_idx);   /* sync global (covers pc_demo without lang_init) */
     app->model->time_format_24h = flash_get_bool("settings", "fmt24", true);
     app->model->sleep_timeout_min = flash_get_i32("settings", "sleep", 5);
     app->model->auto_power_off_min = flash_get_i32("settings", "auto_power_off", 15);
@@ -108,12 +110,14 @@ void settings_model_set_timezone(struct SettingsApp* app, int idx) {
 }
 
 int settings_model_get_language(struct SettingsApp* app) {
-    return app->model ? app->model->language_idx : 0;
+    (void)app;
+    return (int)lang_get();
 }
 void settings_model_set_language(struct SettingsApp* app, int idx) {
     if (!app->model) return;
     app->model->language_idx = idx;
     flash_set_i32("settings", "lang", idx);
+    lang_set((lang_t)idx);
     ESP_LOGI(TAG, "language set to %d",idx);
 }
 

@@ -2,11 +2,12 @@
 #include "view_tab_bar.h"
 #include "../view.h"
 #include "../app.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
-static const char* TAB_NAMES[TAB_COUNT] = {
-    "网络", "本地", "播放", "我的"
+static const int TAB_STR_KEYS[TAB_COUNT] = {
+    STR_TAB_NETWORK, STR_TAB_LOCAL, STR_TAB_PLAY, STR_TAB_ME
 };
 
 static const int TAB_PAGE_IDS[TAB_COUNT] = {
@@ -51,7 +52,7 @@ lv_obj_t* podcast_view_create_bottom_tab_bar(lv_obj_t* parent, main_tab_t active
         lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
 
         lv_obj_t* label = lv_label_create(btn);
-        lv_label_set_text(label, TAB_NAMES[i]);
+        lv_label_set_text(label, tr(TAB_STR_KEYS[i]));
         lv_obj_set_style_text_font(label, g_cjk_font, 0);
         lv_obj_center(label);
         if (i == (int)active) {

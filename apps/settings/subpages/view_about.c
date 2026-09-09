@@ -9,13 +9,14 @@
 #include "../app.h"
 #include "lv_page.h"
 #include "flash_store.h"
+#include "lang.h"
 
 extern SettingsApp g_settings_app;
 
 static lv_obj_t* build_about_page(struct SettingsApp *app, void *user_data)
 {
     (void)user_data;
-    Page page = lv_page_create("About", true, page_navigator_navigate_back,
+    Page page = lv_page_create(tr(STR_ABOUT), true, page_navigator_navigate_back,
                                &app->view->page_nav);
 
     lv_obj_set_style_bg_color(page.container, lv_color_hex(0xF5F5F5), 0);
@@ -28,15 +29,15 @@ static lv_obj_t* build_about_page(struct SettingsApp *app, void *user_data)
     flash_get_str("podcast", "devid", dev_id, sizeof(dev_id), "N/A");
 
     struct {
-        const char *label;
+        int str_key;
         const char *value;
     } items[] = {
-        {"Device Name",  "NomadCast"},
-        {"Device ID",    dev_id},
-        {"Firmware Ver", "0.1.1"},
-        {"SDK",          "ESP-IDF v5.5.3"},
-        {"Hardware",     "Leisound V1 (ESP32-S3)"},
-        {"LVGL",         "v9.5"},
+        {STR_DEVICE_NAME,  "NomadCast"},
+        {STR_DEVICE_ID,    dev_id},
+        {STR_FIRMWARE_VER, "0.1.1"},
+        {STR_SDK,          "ESP-IDF v5.5.3"},
+        {STR_HARDWARE,     "Leisound V1 (ESP32-S3)"},
+        {STR_LVGL,         "v9.5"},
     };
 
     for (int i = 0; i < (int)(sizeof(items) / sizeof(items[0])); i++) {
@@ -50,7 +51,7 @@ static lv_obj_t* build_about_page(struct SettingsApp *app, void *user_data)
         lv_obj_set_style_pad_row(row, 2, 0);
 
         lv_obj_t *lb = lv_label_create(row);
-        lv_label_set_text(lb, items[i].label);
+        lv_label_set_text(lb, tr(items[i].str_key));
         lv_obj_set_style_text_color(lb, lv_color_hex(0x999999), 0);
 
         lv_obj_t *val = lv_label_create(row);

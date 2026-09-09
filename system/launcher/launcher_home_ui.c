@@ -12,6 +12,9 @@
 #include "app_manager.h"
 #include "lv_page.h"
 #include "launcher.h"
+#include "lang.h"
+
+extern const lv_font_t *g_cjk_font;
 
 static const char *TAG = "home_ui";
 
@@ -117,8 +120,8 @@ static lv_obj_t *create_app_grid_button(lv_obj_t *container, application_t *app,
 
     /* App name label */
     lv_obj_t *label = lv_label_create(btn);
-    lv_label_set_text(label, app->name);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(label, app_name_tr(app->name));
+    lv_obj_set_style_text_font(label, g_cjk_font ? g_cjk_font : &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_width(label, cell_w);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
@@ -131,7 +134,7 @@ static lv_obj_t *create_app_grid_button(lv_obj_t *container, application_t *app,
 
 void launcher_home_ui(void)
 {
-    Page home_page = lv_page_create("Applications", false, NULL, NULL);
+    Page home_page = lv_page_create(tr(STR_APPLICATIONS), false, NULL, NULL);
     lv_obj_del(home_page.header);
     lv_scr_load(home_page.screen);
 
@@ -143,7 +146,7 @@ void launcher_home_ui(void)
     if (app_count == 0) {
         ESP_LOGW(TAG, "No apps registered");
         lv_obj_t *lbl = lv_label_create(home_page.container);
-        lv_label_set_text(lbl, "No apps installed");
+        lv_label_set_text(lbl, tr(STR_NO_APPS));
         lv_obj_set_grid_cell(lbl, LV_GRID_ALIGN_CENTER, 0, 2,
                                   LV_GRID_ALIGN_CENTER, 0, 1);
         return;
@@ -162,7 +165,7 @@ void launcher_home_ui(void)
 
     if (visible == 0) {
         lv_obj_t *lbl = lv_label_create(home_page.container);
-        lv_label_set_text(lbl, "All apps are hidden");
+        lv_label_set_text(lbl, tr(STR_ALL_APPS_HIDDEN));
         lv_obj_set_grid_cell(lbl, LV_GRID_ALIGN_CENTER, 0, 2,
                                   LV_GRID_ALIGN_CENTER, 0, 1);
     }

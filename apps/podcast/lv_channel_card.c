@@ -11,6 +11,7 @@
  */
 #include <stdio.h>
 #include "lv_channel_card.h"
+#include "lang.h"
 
 lv_obj_t *lv_channel_card_create(lv_obj_t *parent, const Channel *a) {
     int32_t line_h = lv_font_get_line_height(g_cjk_font);
@@ -81,7 +82,7 @@ lv_obj_t *lv_channel_card_create(lv_obj_t *parent, const Channel *a) {
     lv_obj_clear_flag(bottom, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *ep = lv_label_create(bottom);
-    lv_label_set_text_fmt(ep, "%d episodes", a->episode_count);
+    lv_label_set_text_fmt(ep, tr(STR_EPISODES), a->episode_count);
     lv_obj_set_style_text_color(ep, lv_color_hex(0x999999), 0);
     lv_obj_set_style_text_font(ep, g_cjk_font, 0);
     lv_obj_align(ep, LV_ALIGN_LEFT_MID, 0, 0);

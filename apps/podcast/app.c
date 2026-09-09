@@ -14,6 +14,7 @@
 #include "local_cache.h"
 #include "hal.h"
 #include "flash_store.h"
+#include "lang.h"
 
 PodcastApp g_podcast_app;
 
@@ -92,7 +93,7 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t *wel = lv_label_create(splash);
-    lv_label_set_text(wel, "Welcome to\nNomadCast");
+    lv_label_set_text(wel, tr(STR_WELCOME));
     lv_obj_set_style_text_color(wel, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_align(wel, LV_TEXT_ALIGN_CENTER, 0);
 

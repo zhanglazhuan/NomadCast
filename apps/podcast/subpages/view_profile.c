@@ -17,6 +17,7 @@
 #include "../cache.h"
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -68,7 +69,7 @@ static void on_login_clicked(lv_event_t* e) {
     lv_obj_set_style_pad_all(content, 16, 0);
 
     lv_obj_t* title = lv_label_create(content);
-    lv_label_set_text(title, "Welcome");
+    lv_label_set_text(title, tr(STR_WELCOME_SIMPLE));
     lv_obj_set_style_text_font(title, g_cjk_font, 0);
 
     lv_obj_t* btn_login = lv_button_create(content);
@@ -78,7 +79,7 @@ static void on_login_clicked(lv_event_t* e) {
     lv_obj_set_user_data(btn_login, (void*)(uintptr_t)LOGIN_MODE_LOGIN);
     lv_obj_add_event_cb(btn_login, on_sheet_choice, LV_EVENT_CLICKED, ctx);
     lv_obj_t* bl = lv_label_create(btn_login);
-    lv_label_set_text(bl, "Login");
+    lv_label_set_text(bl, tr(STR_LOGIN));
     lv_obj_center(bl);
     lv_obj_set_style_text_color(bl, lv_color_hex(0xFFFFFF), 0);
 
@@ -89,7 +90,7 @@ static void on_login_clicked(lv_event_t* e) {
     lv_obj_set_user_data(btn_reg, (void*)(uintptr_t)LOGIN_MODE_REGISTER);
     lv_obj_add_event_cb(btn_reg, on_sheet_choice, LV_EVENT_CLICKED, ctx);
     lv_obj_t* br = lv_label_create(btn_reg);
-    lv_label_set_text(br, "Register");
+    lv_label_set_text(br, tr(STR_REGISTER));
     lv_obj_center(br);
     lv_obj_set_style_text_color(br, lv_color_hex(0xFFFFFF), 0);
 }
@@ -115,7 +116,7 @@ static void on_logout_clicked(lv_event_t* e) {
     lv_obj_set_style_pad_row(content, 16, 0);
 
     lv_obj_t* msg = lv_label_create(content);
-    lv_label_set_text(msg, "Are you sure logout?");
+    lv_label_set_text(msg, tr(STR_ARE_YOU_SURE_LOGOUT));
     lv_obj_set_style_text_color(msg, lv_color_hex(0x666666), 0);
 
     lv_obj_t* confirm = lv_button_create(content);
@@ -124,7 +125,7 @@ static void on_logout_clicked(lv_event_t* e) {
     lv_obj_set_style_radius(confirm, 6, 0);
     lv_obj_add_event_cb(confirm, on_logout_confirm, LV_EVENT_CLICKED, ctx);
     lv_obj_t* cfl = lv_label_create(confirm);
-    lv_label_set_text(cfl, "Logout");
+    lv_label_set_text(cfl, tr(STR_LOGOUT));
     lv_obj_center(cfl);
     lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
 
@@ -134,7 +135,7 @@ static void on_logout_clicked(lv_event_t* e) {
     lv_obj_set_style_radius(cancel, 6, 0);
     lv_obj_add_event_cb(cancel, on_sheet_cancel, LV_EVENT_CLICKED, ctx);
     lv_obj_t* cl = lv_label_create(cancel);
-    lv_label_set_text(cl, "Cancel");
+    lv_label_set_text(cl, tr(STR_CANCEL));
     lv_obj_center(cl);
 }
 #endif /* PROFILE_LOGIN_BTN */
@@ -149,9 +150,9 @@ static void dl_count_refresh_cb(lv_timer_t *t) {
     if (lv_obj_is_valid(label)) {
         int count = podcast_model_get_pending_download_count(&g_podcast_app);
         if (count > 0)
-            lv_label_set_text_fmt(label, "Download Task(%d)", count);
+            lv_label_set_text_fmt(label, tr(STR_DOWNLOAD_TASK_N), count);
         else
-            lv_label_set_text(label, "Download Task");
+            lv_label_set_text(label, tr(STR_DOWNLOAD_TASK));
     } else {
         lv_timer_del(t);
         g_profile_dl_timer = NULL;
@@ -217,11 +218,11 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     const char* user_id  = podcast_model_get_user_id(app);
 
     lv_obj_t* name = lv_label_create(info);
-    lv_label_set_text(name, logged_in ? username : "Not logged in");
+    lv_label_set_text(name, logged_in ? username : tr(STR_NOT_LOGGED_IN));
     lv_obj_set_style_text_font(name, g_cjk_font, 0);
 
     lv_obj_t* uid = lv_label_create(info);
-    lv_label_set_text(uid, logged_in ? user_id : "Tap to login");
+    lv_label_set_text(uid, logged_in ? user_id : tr(STR_TAP_TO_LOGIN));
     lv_obj_set_style_text_color(uid, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(uid, g_cjk_font, 0);
 
@@ -267,7 +268,7 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     snprintf(dl_val, sizeof(dl_val), "%d", downloads);
 
     struct { const char* val; const char* label; } stat_data[] = {
-        {play_val, "Play Hours"}, {dl_val, "Downloads"},
+        {play_val, tr(STR_PLAY_HOURS)}, {dl_val, tr(STR_DOWNLOADS)},
     };
     for (int i = 0; i < 2; i++) {
         lv_obj_t* item = lv_obj_create(stats);
@@ -292,9 +293,9 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     int pend_count = podcast_model_get_pending_download_count(&g_podcast_app);
     char dt_label[64];
     if (pend_count > 0)
-        snprintf(dt_label, sizeof(dt_label), "Download Task(%d)", pend_count);
+        snprintf(dt_label, sizeof(dt_label), tr(STR_DOWNLOAD_TASK_N), pend_count);
     else
-        snprintf(dt_label, sizeof(dt_label), "Download Task");
+        snprintf(dt_label, sizeof(dt_label), "%s", tr(STR_DOWNLOAD_TASK));
 
     lv_obj_t* dt_btn = lv_button_create(main);
     lv_obj_set_size(dt_btn, LV_PCT(100), 42);
@@ -322,7 +323,7 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     lv_obj_add_event_cb(settings_btn, on_settings_clicked, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t* st = lv_label_create(settings_btn);
-    lv_label_set_text(st, "Settings");
+    lv_label_set_text(st, tr(STR_APP_SETTINGS));
     lv_obj_set_style_text_color(st, lv_color_hex(0xFFFFFF), 0);
     lv_obj_center(st);
 

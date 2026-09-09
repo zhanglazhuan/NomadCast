@@ -37,6 +37,7 @@ extern "C" {
 #include "sleep_monitor.h"
 #include "flash_store.h"
 #include "clock.h"
+#include "lang.h"
 #include "battery.h"
 #include "audio_player.h"
 #include "ota.h"
@@ -467,6 +468,7 @@ static void system_services_init(const app_context_t *app)
 
     /* Settings consumers depend on flash_store being initialized first. */
     flash_store_init();
+    lang_init();
     clock_init();
     battery_init();
 

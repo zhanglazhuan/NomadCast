@@ -16,6 +16,7 @@
 #include "app_event.h"
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -162,9 +163,9 @@ static void calc_est_time(struct PodcastApp* app, char* buf, int buf_size) {
 
     int est_sec = (int)(remaining_bytes / avg_bps);
     if (est_sec < 60) {
-        snprintf(buf, buf_size, "~%d sec", est_sec);
+        snprintf(buf, buf_size, tr(STR_SEC), est_sec);
     } else {
-        snprintf(buf, buf_size, "~%d min", est_sec / 60);
+        snprintf(buf, buf_size, tr(STR_MIN_EST), est_sec / 60);
     }
 }
 
@@ -293,7 +294,7 @@ static void on_delete_clicked(lv_event_t* e) {
     lv_obj_set_style_pad_row(content, 16, 0);
 
     lv_obj_t* msg = lv_label_create(content);
-    lv_label_set_text(msg, "Delete selected tasks?\n(Downloaded files are kept;\nunfinished ones are removed.)");
+    lv_label_set_text(msg, tr(STR_DELETE_SELECTED_TASKS));
     lv_obj_set_style_text_color(msg, lv_color_hex(0x666666), 0);
 
     lv_obj_t* confirm = lv_button_create(content);
@@ -302,7 +303,7 @@ static void on_delete_clicked(lv_event_t* e) {
     lv_obj_set_style_radius(confirm, 6, 0);
     lv_obj_add_event_cb(confirm, on_delete_confirm, LV_EVENT_CLICKED, ctx);
     lv_obj_t* cfl = lv_label_create(confirm);
-    lv_label_set_text(cfl, "Delete");
+    lv_label_set_text(cfl, tr(STR_DELETE));
     lv_obj_center(cfl);
     lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
 
@@ -312,7 +313,7 @@ static void on_delete_clicked(lv_event_t* e) {
     lv_obj_set_style_radius(cancel, 6, 0);
     lv_obj_add_event_cb(cancel, on_sheet_cancel, LV_EVENT_CLICKED, ctx);
     lv_obj_t* cl = lv_label_create(cancel);
-    lv_label_set_text(cl, "Cancel");
+    lv_label_set_text(cl, tr(STR_CANCEL));
     lv_obj_center(cl);
 }
 
@@ -340,7 +341,7 @@ static lv_obj_t* build_stats_card(lv_obj_t* parent, struct PodcastApp* app) {
     snprintf(fail_buf, sizeof(fail_buf), "%d", failed);
 
     const char* vals[]   = {pend_buf, comp_buf, fail_buf, est_buf};
-    const char* labels[] = {"Pending", "Done", "Failed", "ETA"};
+    const char* labels[] = {tr(STR_PENDING), tr(STR_DONE), tr(STR_FAILED), tr(STR_ETA)};
 
     for (int i = 0; i < 4; i++) {
         lv_obj_t* item = lv_obj_create(card);
@@ -382,7 +383,7 @@ static lv_obj_t* build_list_header(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     lv_obj_add_event_cb(sw, on_select_all_switch, LV_EVENT_VALUE_CHANGED, ctx);
 
     lv_obj_t* sw_label = lv_label_create(hdr);
-    lv_label_set_text(sw_label, "ALL");
+    lv_label_set_text(sw_label, tr(STR_ALL));
     lv_obj_align(sw_label, LV_ALIGN_LEFT_MID, 48, 0);
     lv_obj_set_style_text_font(sw_label, g_cjk_font, 0);
     lv_obj_set_style_text_color(sw_label, lv_color_hex(0x666666), 0);
@@ -422,7 +423,7 @@ static lv_obj_t* build_list_header(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
 
     /* Status 列头 */
     lv_obj_t* sh = lv_label_create(hdr);
-    lv_label_set_text(sh, "Status");
+    lv_label_set_text(sh, tr(STR_STATUS));
     lv_obj_align(sh, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_set_style_text_color(sh, lv_color_hex(0xAAAAAA), 0);
     lv_obj_set_style_text_font(sh, g_cjk_font, 0);
@@ -473,15 +474,15 @@ static lv_obj_t* build_task_row(lv_obj_t* parent, const DownloadTask* task, int 
     char pct_buf[12];
     switch (task->status) {
         case DOWNLOAD_STATUS_PENDING:
-            status_color = 0x888888; status_text = "等待"; break;
+            status_color = 0x888888; status_text = tr(STR_PENDING); break;
         case DOWNLOAD_STATUS_DOWNLOADING:
             status_color = 0x1976D2;
             snprintf(pct_buf, sizeof(pct_buf), "%d%%", task->progress);
             status_text = pct_buf; break;
         case DOWNLOAD_STATUS_COMPLETED:
-            status_color = 0x4CAF50; status_text = "完成"; break;
+            status_color = 0x4CAF50; status_text = tr(STR_DONE); break;
         case DOWNLOAD_STATUS_FAILED:
-            status_color = 0xE53935; status_text = "失败"; break;
+            status_color = 0xE53935; status_text = tr(STR_FAILED); break;
         default:
             status_color = 0x888888; status_text = "?"; break;
     }
@@ -561,7 +562,7 @@ static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
 
     if (ctx->task_count == 0) {
         lv_obj_t* empty = lv_label_create(parent);
-        lv_label_set_text(empty, "No download tasks");
+        lv_label_set_text(empty, tr(STR_NO_DOWNLOAD_TASKS));
         lv_obj_set_style_text_color(empty, lv_color_hex(0xAAAAAA), 0);
         lv_obj_center(empty);
         return parent;
@@ -649,7 +650,7 @@ static lv_obj_t* build_action_bar(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     lv_obj_set_style_radius(ctx->delete_btn, 6, 0);
     lv_obj_add_event_cb(ctx->delete_btn, on_delete_clicked, LV_EVENT_CLICKED, ctx);
     lv_obj_t* dl = lv_label_create(ctx->delete_btn);
-    lv_label_set_text(dl, "Delete");
+    lv_label_set_text(dl, tr(STR_DELETE));
     lv_obj_center(dl);
     lv_obj_set_style_text_color(dl, lv_color_hex(0xFFFFFF), 0);
 
@@ -663,7 +664,7 @@ static lv_obj_t* build_action_bar(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     lv_obj_add_event_cb(ctx->pause_btn, on_pause_resume_clicked, LV_EVENT_CLICKED, ctx);
     ctx->pause_label = lv_label_create(ctx->pause_btn);
     lv_label_set_text(ctx->pause_label,
-        podcast_controller_is_download_paused(ctx->app) ? "Resume" : "Pause");
+        podcast_controller_is_download_paused(ctx->app) ? tr(STR_RESUME) : tr(STR_PAUSE));
     lv_obj_center(ctx->pause_label);
     lv_obj_set_style_text_color(ctx->pause_label, lv_color_hex(0xFFFFFF), 0);
 
@@ -674,7 +675,7 @@ static lv_obj_t* build_action_bar(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
 /* ---- 页面主构建函数 ---- */
 static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_data) {
     (void)user_data;
-    Page page = lv_page_create("Download Task", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_DOWNLOAD_TASK), true, page_navigator_navigate_back, &app->view->page_nav);
 
     static bool evt_registered = false;
     if (!evt_registered) {

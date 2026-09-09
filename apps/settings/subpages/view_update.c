@@ -16,11 +16,13 @@
 #include "view_ota_status.h"
 #include "ota.h"
 #include "flash_store.h"
+#include "lang.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 extern SettingsApp g_settings_app;
+extern const lv_font_t *g_cjk_font;
 
 /* Default manifest URL — flash key "upd_url" can override it (see ota.h). */
 
@@ -152,13 +154,13 @@ static void on_install_clicked(lv_event_t *e)
     lv_obj_set_style_pad_row(content, 12, 0);
 
     lv_obj_t *title = lv_label_create(content);
-    lv_label_set_text(title, "OTA Update");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title, tr(STR_OTA_UPDATE));
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
 
     lv_obj_t *warn = lv_label_create(content);
-    lv_label_set_text(warn, "Battery must be at least 30%.\nDo not power off during the update.");
+    lv_label_set_text(warn, tr(STR_OTA_WARN));
     lv_obj_set_style_text_color(warn, lv_color_hex(0xE53935), 0);
-    lv_obj_set_style_text_font(warn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(warn, g_cjk_font, 0);
 
     lv_obj_t *confirm = lv_button_create(content);
     lv_obj_set_size(confirm, LV_PCT(100), 44);
@@ -166,7 +168,7 @@ static void on_install_clicked(lv_event_t *e)
     lv_obj_set_style_radius(confirm, 6, 0);
     lv_obj_add_event_cb(confirm, on_confirm_ota, LV_EVENT_CLICKED, NULL);
     lv_obj_t *cfl = lv_label_create(confirm);
-    lv_label_set_text(cfl, "Confirm");
+    lv_label_set_text(cfl, tr(STR_CONFIRM));
     lv_obj_center(cfl);
     lv_obj_set_style_text_color(cfl, lv_color_hex(0xFFFFFF), 0);
 
@@ -176,7 +178,7 @@ static void on_install_clicked(lv_event_t *e)
     lv_obj_set_style_radius(cancel, 6, 0);
     lv_obj_add_event_cb(cancel, on_cancel_ota, LV_EVENT_CLICKED, NULL);
     lv_obj_t *ccl = lv_label_create(cancel);
-    lv_label_set_text(ccl, "Cancel");
+    lv_label_set_text(ccl, tr(STR_CANCEL));
     lv_obj_center(ccl);
 }
 
@@ -191,7 +193,7 @@ static void on_ota_checked(ota_check_result_t result,
 
     switch (result) {
     case OTA_CHECK_UP_TO_DATE:
-        toast("Already up-to-date");
+        toast(tr(STR_ALREADY_UP_TO_DATE));
         break;
 
     case OTA_CHECK_UPDATE_AVAILABLE: {
@@ -234,9 +236,9 @@ static void on_ota_checked(ota_check_result_t result,
 
         if (release_date && release_date[0]) {
             lv_obj_t *date = lv_label_create(info);
-            lv_label_set_text_fmt(date, "Released: %s", release_date);
+            lv_label_set_text_fmt(date, tr(STR_RELEASED), release_date);
             lv_obj_set_style_text_color(date, lv_color_hex(0x888888), 0);
-            lv_obj_set_style_text_font(date, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(date, g_cjk_font, 0);
         }
 
         /* 最多显示3条，单行截断不跨行 */
@@ -248,24 +250,24 @@ static void on_ota_checked(ota_check_result_t result,
         lv_obj_set_style_bg_color(install, lv_color_hex(0x4CAF50), 0);
         lv_obj_set_style_radius(install, 6, 0);
         lv_obj_t *in_lb = lv_label_create(install);
-        lv_label_set_text(in_lb, "OTA Now");
+        lv_label_set_text(in_lb, tr(STR_OTA_NOW));
         lv_obj_center(in_lb);
         lv_obj_set_style_text_color(in_lb, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_font(in_lb, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(in_lb, g_cjk_font, 0);
         lv_obj_add_event_cb(install, on_install_clicked, LV_EVENT_CLICKED, NULL);
         break;
     }
 
     case OTA_CHECK_ERROR_NO_URL:
-        toast("URL not configured");
+        toast(tr(STR_URL_NOT_CONFIGURED));
         break;
 
     case OTA_CHECK_ERROR_NETWORK:
-        toast("Server unreachable");
+        toast(tr(STR_SERVER_UNREACHABLE));
         break;
 
     case OTA_CHECK_ERROR_PARSE:
-        toast("Invalid server response");
+        toast(tr(STR_INVALID_SERVER_RESPONSE));
         break;
     }
 }
@@ -277,13 +279,13 @@ static void on_check_update_clicked(lv_event_t *e) {
 
     /* Pre-checks — fail fast with specific messages */
     if (!hal_wifi_is_connected()) {
-        toast("No network connection");
+        toast(tr(STR_NO_NETWORK_CONNECTION));
         return;
     }
 
     const char *url = get_manifest_url();
     if (!url_looks_valid(url)) {
-        toast("URL not configured");
+        toast(tr(STR_URL_NOT_CONFIGURED));
         return;
     }
 
@@ -297,7 +299,7 @@ static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
 
     s_cards_container = NULL;
 
-    Page page = lv_page_create("Update", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_UPDATE), true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_t *cont = page.container;
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 12, 0);
@@ -315,8 +317,8 @@ static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
     lv_obj_set_flex_flow(row_auto, LV_FLEX_FLOW_COLUMN);
 
     lv_obj_t *lb_title = lv_label_create(row_auto);
-    lv_label_set_text(lb_title, "Auto Update");
-    lv_obj_set_style_text_font(lb_title, &lv_font_montserrat_14, 0);
+    lv_label_set_text(lb_title, tr(STR_AUTO_UPDATE));
+    lv_obj_set_style_text_font(lb_title, g_cjk_font, 0);
     lv_obj_set_style_text_color(lb_title, lv_color_hex(0x666666), 0);
     lv_obj_set_style_margin_bottom(lb_title, 4, 0);
 
@@ -330,10 +332,10 @@ static lv_obj_t *build_update_page(struct SettingsApp *app, void *user_data) {
     lv_obj_set_size(btn, LV_PCT(100), 40);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x1976D2), 0);
     lv_obj_t *lb_btn = lv_label_create(btn);
-    lv_label_set_text(lb_btn, "Check for Update");
+    lv_label_set_text(lb_btn, tr(STR_CHECK_FOR_UPDATE));
     lv_obj_center(lb_btn);
     lv_obj_set_style_text_color(lb_btn, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(lb_btn, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(lb_btn, g_cjk_font, 0);
     lv_obj_add_event_cb(btn, on_check_update_clicked, LV_EVENT_CLICKED, NULL);
 
     /* ── Update cards container (populated when a new version is found) ── */

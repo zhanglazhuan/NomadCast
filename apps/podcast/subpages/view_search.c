@@ -12,6 +12,7 @@
 #include "../controller.h"
 #include "lv_page.h"
 #include "lv_toast.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -107,7 +108,7 @@ static void on_clear_history(lv_event_t *e) {
     SearchPageCtx *ctx = lv_event_get_user_data(e);
     podcast_model_clear_search_history(&g_podcast_app);
     if (ctx && ctx->history) lv_obj_clean(ctx->history);
-    lv_toast_show("Search history cleared", 1500);
+    lv_toast_show(tr(STR_SEARCH_HISTORY_CLEARED), 1500);
 }
 
 static void ctx_cleanup_cb(lv_event_t *e) {
@@ -172,7 +173,7 @@ static void on_kb_lang(lv_event_t *e) {
 
 static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     (void)user_data;
-    Page page = lv_page_create("Search", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_SEARCH), true, page_navigator_navigate_back, &app->view->page_nav);
 
     if (app->view->page_nav.nav_ctx) free(app->view->page_nav.nav_ctx);
     SearchPageCtx *ctx = (SearchPageCtx *)calloc(1, sizeof(SearchPageCtx));
@@ -187,7 +188,7 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
 
     lv_obj_t *ta = lv_textarea_create(search_bar);
     lv_obj_set_size(ta, LV_PCT(100), 32);
-    lv_textarea_set_placeholder_text(ta, "Search podcasts...");
+    lv_textarea_set_placeholder_text(ta, tr(STR_SEARCH_PODCASTS));
     lv_obj_set_style_border_width(ta, 1, 0);
     lv_obj_set_style_border_color(ta, lv_color_hex(0xCCCCCC), 0);
     lv_obj_set_style_radius(ta, 4, 0);
@@ -240,7 +241,7 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     lv_obj_add_event_cb(clear_btn, on_clear_history, LV_EVENT_CLICKED, ctx);
 
     lv_obj_t *clear_label = lv_label_create(clear_btn);
-    lv_label_set_text(clear_label, "Clear search history");
+    lv_label_set_text(clear_label, tr(STR_CLEAR_SEARCH_HISTORY));
     lv_obj_center(clear_label);
     lv_obj_set_style_text_color(clear_label, lv_color_hex(0x999999), 0);
     lv_obj_set_style_text_font(clear_label, g_cjk_font, 0);

@@ -14,6 +14,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/sleep_monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/system/flash_store
     ${CMAKE_CURRENT_SOURCE_DIR}/system/clock
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/lang
     ${CMAKE_CURRENT_SOURCE_DIR}/system/battery_monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/system/events
     ${CMAKE_CURRENT_SOURCE_DIR}/system/logs

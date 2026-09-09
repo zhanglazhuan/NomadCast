@@ -21,6 +21,7 @@
 #include "../lv_channel_card.h"
 #include "launcher.h"
 #include "app_manager.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_forward_media;
@@ -92,7 +93,7 @@ static void on_open_settings_clicked(lv_event_t* e) {
 static void build_wifi_offline(lv_obj_t* parent, NetworkPage* np) {
     (void)np;
     lv_obj_t* label = lv_label_create(parent);
-    lv_label_set_text(label, "No network.\nPlease connect WiFi in Settings.");
+    lv_label_set_text(label, tr(STR_NO_NETWORK));
     lv_obj_set_style_text_color(label, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
     lv_obj_set_size(label, 200, LV_SIZE_CONTENT);
@@ -111,7 +112,7 @@ static void build_wifi_offline(lv_obj_t* parent, NetworkPage* np) {
     lv_obj_align(btn, LV_ALIGN_CENTER, 0, 24);
 
     lv_obj_t* btn_label = lv_label_create(btn);
-    lv_label_set_text(btn_label, "Open Settings");
+    lv_label_set_text(btn_label, tr(STR_OPEN_SETTINGS));
     lv_obj_set_style_text_color(btn_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(btn_label, g_cjk_font, 0);
     lv_obj_center(btn_label);
@@ -142,7 +143,7 @@ static void loading_anim_cb(lv_timer_t* timer) {
     if (np->dot_count <= 1) { np->dot_count = 1; np->dot_dir =  1; }
 
     char buf[16];
-    snprintf(buf, sizeof(buf), "Loading%.*s", np->dot_count, "...");
+    snprintf(buf, sizeof(buf), "%s%.*s", tr(STR_LOADING), np->dot_count, "...");
     lv_label_set_text(np->loading_label, buf);
 }
 
@@ -159,7 +160,7 @@ static void fetch_timeout_cb(lv_timer_t* timer) {
     np->state = NP_STATE_ERROR;
     stop_all_timers(np);
     lv_obj_clean(np->container);
-    build_error(np->container, "Request timed out. Please retry.", np);
+    build_error(np->container, tr(STR_REQUEST_TIMED_OUT), np);
     np->content_built = true;
 }
 
@@ -198,7 +199,7 @@ static void poll_ready_cb(lv_timer_t* timer) {
         np->state = NP_STATE_ERROR;
         lv_obj_clean(np->container);
         const char* err = podcast_model_get_net_error(&g_podcast_app);
-        build_error(np->container, err ? err : "Failed to load content", np);
+        build_error(np->container, err ? err : tr(STR_FAILED_TO_LOAD_CONTENT), np);
         np->content_built = true;
         printf("[INF] Network page built (error)\n"); fflush(stdout);
         return;
@@ -224,7 +225,7 @@ static void poll_ready_cb(lv_timer_t* timer) {
 
 static lv_obj_t* build_loading(lv_obj_t* parent) {
     lv_obj_t* label = lv_label_create(parent);
-    lv_label_set_text(label, "Loading.");
+    lv_label_set_text(label, tr(STR_LOADING));
     lv_obj_set_style_text_color(label, lv_color_hex(0x999999), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
     lv_obj_set_width(label, LV_PCT(100));
@@ -355,14 +356,14 @@ static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
     lv_obj_set_style_shadow_width(search_btn, 0, 0);
     lv_obj_add_event_cb(search_btn, on_search_bar_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_t *search_lbl = lv_label_create(search_btn);
-    lv_label_set_text(search_lbl, "Search...");
+    lv_label_set_text(search_lbl, tr(STR_SEARCH_PLACEHOLDER));
     lv_obj_set_style_text_color(search_lbl, lv_color_hex(0x999999), 0);
     lv_obj_align(search_lbl, LV_ALIGN_LEFT_MID, 8, 0);
 
     /* Category dropdown */
     ctx->dropdown = lv_dropdown_create(top_bar);
-    lv_dropdown_set_options(ctx->dropdown,
-        "全部\n时事\n科技\n人文\n生活\n教育\n其他");
+    lv_dropdown_set_options(ctx->dropdown, tr(STR_CATEGORY_OPTIONS));
+    lv_obj_set_style_text_font(ctx->dropdown, g_cjk_font, 0);
     lv_obj_set_width(ctx->dropdown, LV_PCT(35));
     lv_obj_set_height(ctx->dropdown, 32);
     lv_obj_set_style_border_width(ctx->dropdown, 2, 0);
@@ -377,6 +378,7 @@ static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
     lv_obj_t *dd_list = lv_dropdown_get_list(ctx->dropdown);
     lv_obj_set_width(dd_list, lv_pct(55));
     lv_obj_set_style_pad_hor(dd_list, 6, 0);
+    lv_obj_set_style_text_font(dd_list, g_cjk_font, 0);
 
     /* Content area — scrollable card list */
     ctx->content = lv_obj_create(parent);
@@ -483,7 +485,7 @@ static void on_retry_clicked(lv_event_t* e) {
 
 static void build_error(lv_obj_t* parent, const char* msg, NetworkPage* np) {
     lv_obj_t* line1 = lv_label_create(parent);
-    lv_label_set_text(line1, msg ? msg : "Failed to load content");
+    lv_label_set_text(line1, msg ? msg : tr(STR_FAILED_TO_LOAD_CONTENT));
     lv_obj_set_style_text_color(line1, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(line1, g_cjk_font, 0);
     lv_obj_set_size(line1, 200, LV_SIZE_CONTENT);
@@ -502,7 +504,7 @@ static void build_error(lv_obj_t* parent, const char* msg, NetworkPage* np) {
     lv_obj_align(retry_btn, LV_ALIGN_CENTER, 0, 30);
 
     lv_obj_t* retry_label = lv_label_create(retry_btn);
-    lv_label_set_text(retry_label, "Retry");
+    lv_label_set_text(retry_label, tr(STR_RETRY));
     lv_obj_center(retry_label);
     lv_obj_set_style_text_color(retry_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(retry_label, g_cjk_font, 0);

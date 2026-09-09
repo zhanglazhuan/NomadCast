@@ -9,6 +9,9 @@
 #include "../view.h"
 #include "../app.h"
 #include "lv_page.h"
+#include "lang.h"
+
+extern const lv_font_t *g_cjk_font;
 
 /* OTA 进度共享变量:-1 空闲, 0..100 进度, -2 失败。
  * 由 esp_event 任务写 (view_update.c 的 on_ota_progress),本页 LVGL 定时器读。 */
@@ -29,7 +32,7 @@ static void poll_cb(lv_timer_t *t) {
     (void)t;
     int pct = g_ota_progress;
     if (pct == -2) {                       /* OTA worker 报告失败 */
-        if (s_label) lv_label_set_text(s_label, "Update failed");
+        if (s_label) lv_label_set_text(s_label, tr(STR_UPDATE_FAILED));
         lv_timer_del(t);
         s_timer = NULL;
         return;
@@ -43,7 +46,7 @@ static void poll_cb(lv_timer_t *t) {
 static lv_obj_t *build_ota_status_page(struct SettingsApp *app, void *user_data) {
     (void)user_data;
 
-    Page page = lv_page_create("OTA Status", true, page_navigator_navigate_back,
+    Page page = lv_page_create(tr(STR_OTA_STATUS), true, page_navigator_navigate_back,
                                &app->view->page_nav);
     lv_obj_t *cont = page.container;
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
@@ -53,11 +56,11 @@ static lv_obj_t *build_ota_status_page(struct SettingsApp *app, void *user_data)
 
     lv_obj_t *title = lv_label_create(cont);
     lv_label_set_recolor(title, true);
-    lv_label_set_text(title, "Upgrading. #FF0000 Do not power off.#");
+    lv_label_set_text(title, tr(STR_UPGRADING));
     lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(title, LV_PCT(90));
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
 
     s_bar = lv_bar_create(cont);
     lv_obj_set_size(s_bar, LV_PCT(80), 12);
@@ -66,7 +69,7 @@ static lv_obj_t *build_ota_status_page(struct SettingsApp *app, void *user_data)
 
     s_label = lv_label_create(cont);
     lv_label_set_text(s_label, "0%");
-    lv_obj_set_style_text_font(s_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_label, g_cjk_font, 0);
 
     lv_obj_add_event_cb(page.screen, on_page_delete, LV_EVENT_DELETE, NULL);
     s_timer = lv_timer_create(poll_cb, 200, NULL);

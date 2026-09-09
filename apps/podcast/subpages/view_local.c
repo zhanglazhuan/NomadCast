@@ -20,6 +20,7 @@
 #include "lv_page.h"
 #include "../lv_channel_card.h"
 #include "lv_bottom_sheet.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_search;
@@ -104,13 +105,13 @@ static void show_delete_sheet(const Channel *ch)
 
     /* Title */
     lv_obj_t *title = lv_label_create(content);
-    lv_label_set_text_fmt(title, "Delete \"%s\"?", ch->title);
+    lv_label_set_text_fmt(title, tr(STR_DELETE_QUOTED), ch->title);
     lv_obj_set_style_text_font(title, g_cjk_font, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
 
     /* Subtitle */
     lv_obj_t *sub = lv_label_create(content);
-    lv_label_set_text(sub, "This will remove all downloaded\naudio files for this channel.");
+    lv_label_set_text(sub, tr(STR_REMOVE_DOWNLOADED));
     lv_obj_set_style_text_font(sub, g_cjk_font, 0);
     lv_obj_set_style_text_color(sub, lv_color_hex(0x999999), 0);
 
@@ -124,7 +125,7 @@ static void show_delete_sheet(const Channel *ch)
     lv_obj_add_event_cb(btn, on_delete_confirm, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *btn_lbl = lv_label_create(btn);
-    lv_label_set_text(btn_lbl, "Delete");
+    lv_label_set_text(btn_lbl, tr(STR_DELETE));
     lv_obj_set_style_text_color(btn_lbl, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(btn_lbl, g_cjk_font, 0);
     lv_obj_center(btn_lbl);
@@ -174,7 +175,7 @@ static void build_hint(lv_obj_t* parent, const char* msg, bool show_network_link
         lv_obj_align(btn, LV_ALIGN_CENTER, 0, 44);
 
         lv_obj_t* btn_label = lv_label_create(btn);
-        lv_label_set_text(btn_label, "Go to Network");
+        lv_label_set_text(btn_label, tr(STR_GO_TO_NETWORK));
         lv_obj_set_style_text_color(btn_label, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(btn_label, g_cjk_font, 0);
         lv_obj_center(btn_label);
@@ -309,10 +310,10 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
     podcast_controller_check_local_content(app);
 
     if (!podcast_model_is_local_sd_mounted(app)) {
-        build_hint(page.container, "No SD card inserted, no local content.", false);
+        build_hint(page.container, tr(STR_NO_SD_CARD_LOCAL), false);
         printf("[INF] Local page built (no SD)\n"); fflush(stdout);
     } else if (!podcast_model_has_local_content(app)) {
-        build_hint(page.container, "No audio downloaded yet. Please go to Network to download.", true);
+        build_hint(page.container, tr(STR_NO_AUDIO_DOWNLOADED), true);
         printf("[INF] Local page built (no content)\n"); fflush(stdout);
     } else {
         if (app->view->page_nav.nav_ctx) free(app->view->page_nav.nav_ctx);
@@ -343,13 +344,13 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
         lv_obj_set_style_shadow_width(search_btn, 0, 0);
         lv_obj_add_event_cb(search_btn, on_search_bar_clicked, LV_EVENT_CLICKED, NULL);
         lv_obj_t *search_lbl = lv_label_create(search_btn);
-        lv_label_set_text(search_lbl, "Search...");
+        lv_label_set_text(search_lbl, tr(STR_SEARCH_PLACEHOLDER));
         lv_obj_set_style_text_color(search_lbl, lv_color_hex(0x999999), 0);
         lv_obj_align(search_lbl, LV_ALIGN_LEFT_MID, 8, 0);
 
         ctx->dropdown = lv_dropdown_create(top_bar);
-        lv_dropdown_set_options(ctx->dropdown,
-            "全部\n时事\n科技\n人文\n生活\n教育\n其他");
+        lv_dropdown_set_options(ctx->dropdown, tr(STR_CATEGORY_OPTIONS));
+        lv_obj_set_style_text_font(ctx->dropdown, g_cjk_font, 0);
         lv_obj_set_width(ctx->dropdown, LV_PCT(35));
         lv_obj_set_height(ctx->dropdown, 32);
         lv_obj_set_style_border_width(ctx->dropdown, 2, 0);
@@ -363,6 +364,7 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
         lv_obj_t *dd_list = lv_dropdown_get_list(ctx->dropdown);
         lv_obj_set_width(dd_list, lv_pct(55));
         lv_obj_set_style_pad_hor(dd_list, 6, 0);
+        lv_obj_set_style_text_font(dd_list, g_cjk_font, 0);
 
         /* Content */
         ctx->content = lv_obj_create(page.container);

@@ -16,6 +16,7 @@
 #include "lv_bottom_sheet.h"
 #include "lv_num_input.h"
 #include "lv_page.h"
+#include "lang.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -238,19 +239,19 @@ static void on_playlist(lv_event_t* e) {
     lv_obj_add_event_cb(sw, playlist_on_select_all, LV_EVENT_VALUE_CHANGED, ctx);
 
     lv_obj_t* sw_label = lv_label_create(lh);
-    lv_label_set_text(sw_label, "ALL");
+    lv_label_set_text(sw_label, tr(STR_ALL));
     lv_obj_align(sw_label, LV_ALIGN_LEFT_MID, 48, 0);
     lv_obj_set_style_text_font(sw_label, g_cjk_font, 0);
     lv_obj_set_style_text_color(sw_label, lv_color_hex(0x666666), 0);
 
     lv_obj_t* lhdr = lv_label_create(lh);
-    lv_label_set_text(lhdr, "Title");
+    lv_label_set_text(lhdr, tr(STR_TITLE));
     lv_obj_align(lhdr, LV_ALIGN_LEFT_MID, 100, 0);
     lv_obj_set_style_text_font(lhdr, g_cjk_font, 0);
     lv_obj_set_style_text_color(lhdr, lv_color_hex(0xAAAAAA), 0);
 
     lv_obj_t* rhdr = lv_label_create(lh);
-    lv_label_set_text(rhdr, "Time  ");
+    lv_label_set_text(rhdr, tr(STR_TIME));
     lv_obj_align(rhdr, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_set_style_text_font(rhdr, g_cjk_font, 0);
     lv_obj_set_style_text_color(rhdr, lv_color_hex(0xAAAAAA), 0);
@@ -353,7 +354,7 @@ static void on_playlist(lv_event_t* e) {
     lv_obj_set_size(rm, 80, 28);
     lv_obj_set_style_bg_color(rm, lv_color_hex(0xF44336), 0);
     lv_obj_t* rml = lv_label_create(rm);
-    lv_label_set_text(rml, "Remove");
+    lv_label_set_text(rml, tr(STR_REMOVE));
     lv_obj_center(rml);
     lv_obj_set_style_text_color(rml, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(rm, playlist_on_remove, LV_EVENT_CLICKED, ctx);
@@ -425,10 +426,10 @@ static void on_timer(lv_event_t* e) {
     lv_obj_set_style_pad_all(row_time, 0, 0);
 
     radio_ctx->cb_time = lv_checkbox_create(row_time);
-    lv_checkbox_set_text(radio_ctx->cb_time, "Stop by time");
+    lv_checkbox_set_text(radio_ctx->cb_time, tr(STR_STOP_BY_TIME));
     lv_obj_add_state(radio_ctx->cb_time, LV_STATE_CHECKED);
 
-    radio_ctx->inp_time = lv_number_input_create(row_time, NULL, 15, 5, "minutes");
+    radio_ctx->inp_time = lv_number_input_create(row_time, NULL, 15, 5, tr(STR_MINUTES));
     lv_num_input_set_height(radio_ctx->inp_time, 32);
     lv_obj_set_style_margin_top(radio_ctx->inp_time, 6, 0);
     lv_obj_set_style_pad_left(radio_ctx->inp_time, 16, 0);
@@ -441,9 +442,9 @@ static void on_timer(lv_event_t* e) {
     lv_obj_set_style_pad_all(row_tracks, 0, 0);
 
     radio_ctx->cb_tracks = lv_checkbox_create(row_tracks);
-    lv_checkbox_set_text(radio_ctx->cb_tracks, "Stop by tracks");
+    lv_checkbox_set_text(radio_ctx->cb_tracks, tr(STR_STOP_BY_TRACKS));
 
-    radio_ctx->inp_tracks = lv_number_input_create(row_tracks, NULL, 1, 1, "tracks");
+    radio_ctx->inp_tracks = lv_number_input_create(row_tracks, NULL, 1, 1, tr(STR_TRACKS));
 	lv_num_input_set_height(radio_ctx->inp_tracks, 32);
     lv_obj_set_style_margin_top(radio_ctx->inp_tracks, 6, 0);
     lv_obj_set_style_pad_left(radio_ctx->inp_tracks, 16, 0);
@@ -457,7 +458,7 @@ static void on_timer(lv_event_t* e) {
     lv_obj_set_size(btn, LV_PCT(100), 36);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x1976D2), 0);
     lv_obj_t* bl = lv_label_create(btn);
-    lv_label_set_text(bl, "Confirm");
+    lv_label_set_text(bl, tr(STR_CONFIRM));
     lv_obj_center(bl);
     lv_obj_set_style_text_color(bl, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(btn, on_timer_confirm, LV_EVENT_CLICKED, bs);
@@ -490,7 +491,7 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
 
     const Episode* ep = podcast_model_get_episode_by_id(app, eid);
     const Channel* ch = ep ? podcast_model_get_channel_by_id(app, ep->channel_id) : NULL;
-    const char* tname = ep ? ep->title : "Nothing playing";
+    const char* tname = ep ? ep->title : tr(STR_NOTHING_PLAYING);
     const char* tartist = ch ? ch->artist : "";
     int duration = ep ? ep->duration_sec : 0;
 

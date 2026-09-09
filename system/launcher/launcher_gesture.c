@@ -11,6 +11,9 @@
 #include "app_manager.h"
 #include "launcher.h"
 #include "lv_bottom_sheet.h"
+#include "lang.h"
+
+extern const lv_font_t *g_cjk_font;
 
 static const char *TAG = "gesture";
 
@@ -56,8 +59,9 @@ static void show_exit_confirm_dialog(void)
 
     const char *app_name = app_manager_get_current_app_name();
     lv_obj_t *msg = lv_label_create(cont);
-    lv_label_set_text_fmt(msg, "Exit \"%s\" and\nreturn to launcher?", app_name ? app_name : "App");
-    lv_obj_set_style_text_font(msg, &lv_font_montserrat_14, 0);
+    lv_label_set_text_fmt(msg, tr(STR_EXIT_RETURN),
+                          app_name ? app_name_tr(app_name) : tr(STR_APP_FALLBACK));
+    lv_obj_set_style_text_font(msg, g_cjk_font ? g_cjk_font : &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(msg, lv_color_hex(0x666666), 0);
     lv_obj_set_width(msg, LV_PCT(100));
 
@@ -73,9 +77,9 @@ static void show_exit_confirm_dialog(void)
     lv_obj_set_flex_grow(cancel, 1);
     lv_obj_set_style_bg_color(cancel, lv_color_hex(0xCCCCCC), 0);
     lv_obj_t *ca_lb = lv_label_create(cancel);
-    lv_label_set_text(ca_lb, "Cancel");
+    lv_label_set_text(ca_lb, tr(STR_CANCEL));
     lv_obj_center(ca_lb);
-    lv_obj_set_style_text_font(ca_lb, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ca_lb, g_cjk_font ? g_cjk_font : &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(ca_lb, lv_color_hex(0x333333), 0);
     lv_obj_add_event_cb(cancel, exit_cancel_cb, LV_EVENT_CLICKED, NULL);
 
@@ -83,10 +87,10 @@ static void show_exit_confirm_dialog(void)
     lv_obj_set_flex_grow(exit_btn, 1);
     lv_obj_set_style_bg_color(exit_btn, lv_color_hex(0x1976D2), 0);
     lv_obj_t *ex_lb = lv_label_create(exit_btn);
-    lv_label_set_text(ex_lb, "Exit");
+    lv_label_set_text(ex_lb, tr(STR_EXIT));
     lv_obj_set_style_text_color(ex_lb, lv_color_hex(0xFFFFFF), 0);
     lv_obj_center(ex_lb);
-    lv_obj_set_style_text_font(ex_lb, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ex_lb, g_cjk_font ? g_cjk_font : &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(exit_btn, exit_yes_cb, LV_EVENT_CLICKED, NULL);
 }
 

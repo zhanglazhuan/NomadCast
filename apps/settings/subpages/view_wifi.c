@@ -13,8 +13,10 @@
 #include "lv_toast.h"
 #include "wifi_cred.h"
 #include "hal.h"
+#include "lang.h"
 
 extern SettingsApp g_settings_app;
+extern const lv_font_t *g_cjk_font;
 
 /* ── WiFi 开关 ─────────────────────────────────────────────────────────────── */
 
@@ -63,7 +65,7 @@ static void on_network_clicked(lv_event_t* e) {
     /* Try auto-connect with saved password first */
     if (settings_model_auto_connect(&g_settings_app, ssid)) {
         /* Success — refresh wifi page to show connected state */
-        lv_toast_show("WiFi connected", 2000);
+        lv_toast_show(tr(STR_WIFI_CONNECTED), 2000);
         page_navigator_navigate_to(&g_settings_app.view->page_nav,
                                    &g_settings_app, SETTINGS_PAGE_WIFI, NULL);
         return;
@@ -78,7 +80,7 @@ static void on_network_clicked(lv_event_t* e) {
 static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
     (void)user_data;
 
-    Page page = lv_page_create("WIFI", true, page_navigator_navigate_back, &app->view->page_nav);
+    Page page = lv_page_create(tr(STR_WIFI), true, page_navigator_navigate_back, &app->view->page_nav);
     lv_obj_t* cont = page.container;
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 12, 0);
@@ -97,12 +99,12 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
         if (ok) {
             strncpy(app->model->connected_ssid, pending_ssid, sizeof(app->model->connected_ssid) - 1);
             /* Status bar updated by APP_EVENT_WIFI_CONNECTED from HAL */
-            lv_toast_show("WiFi connected", 2000);
+            lv_toast_show(tr(STR_WIFI_CONNECTED), 2000);
             /* Password was already saved by view_wifi_connect's do_connect.
              * But if auto-connect was used (no view_wifi_connect involved),
              * the save already happened in settings_model_auto_connect. */
         } else {
-            lv_toast_show(err ? err : "Connection failed", 2000);
+            lv_toast_show(err ? err : tr(STR_CONNECTION_FAILED), 2000);
         }
     }
 
@@ -117,8 +119,8 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_flex_align(row_sw, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t* lb_wifi = lv_label_create(row_sw);
-    lv_label_set_text(lb_wifi, "WiFi");
-    lv_obj_set_style_text_font(lb_wifi, &lv_font_montserrat_16, 0);
+    lv_label_set_text(lb_wifi, tr(STR_WIFI));
+    lv_obj_set_style_text_font(lb_wifi, g_cjk_font, 0);
 
     lv_obj_t* sw_wifi = lv_switch_create(row_sw);
     lv_obj_set_height(sw_wifi, 24);
@@ -155,7 +157,7 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_size(btn_scan, LV_PCT(100), 36);
     lv_obj_set_style_bg_color(btn_scan, lv_color_hex(0x1976D2), 0);
     lv_obj_t* lb_scan = lv_label_create(btn_scan);
-    lv_label_set_text(lb_scan, "Scan for Networks");
+    lv_label_set_text(lb_scan, tr(STR_SCAN_FOR_NETWORKS));
     lv_obj_center(lb_scan);
     lv_obj_set_style_text_color(lb_scan, lv_color_hex(0xFFFFFF), 0);
     lv_obj_add_event_cb(btn_scan, on_scan_clicked, LV_EVENT_CLICKED, NULL);
@@ -165,8 +167,8 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
         lv_obj_add_state(btn_scan, LV_STATE_DISABLED);   /* 防止扫描中重复点击 */
 
         lv_obj_t* lb_scanning = lv_label_create(cont);
-        lv_label_set_text(lb_scanning, "Scanning...");
-        lv_obj_set_style_text_font(lb_scanning, &lv_font_montserrat_14, 0);
+        lv_label_set_text(lb_scanning, tr(STR_SCANNING));
+        lv_obj_set_style_text_font(lb_scanning, g_cjk_font, 0);
         lv_obj_set_style_text_color(lb_scanning, lv_color_hex(0x666666), 0);
         lv_obj_set_style_pad_top(lb_scanning, 8, 0);
 
@@ -183,8 +185,8 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
     const WifiNetwork* nets = settings_model_get_scanned_networks(app);
     if (count > 0) {
         lv_obj_t* lb_title = lv_label_create(cont);
-        lv_label_set_text_fmt(lb_title, "Available Networks (%d)", count);
-        lv_obj_set_style_text_font(lb_title, &lv_font_montserrat_14, 0);
+        lv_label_set_text_fmt(lb_title, tr(STR_AVAILABLE_NETWORKS), count);
+        lv_obj_set_style_text_font(lb_title, g_cjk_font, 0);
         lv_obj_set_style_text_color(lb_title, lv_color_hex(0x666666), 0);
 
         for (int i = 0; i < count; i++) {

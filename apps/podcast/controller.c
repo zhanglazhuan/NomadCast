@@ -23,6 +23,7 @@
 #include "local_cache.h"
 #include "hal.h"
 #include "flash_store.h"
+#include "lang.h"
 #include "lv_status_bar.h"
 #include "lv_toast.h"
 #include "sleep_monitor.h"
@@ -371,7 +372,7 @@ bool podcast_controller_fetch_chart_by_category(struct PodcastApp *app, int cat)
 
     if (count <= 0) {
         podcast_model_set_net_state(app, NET_STATE_ERROR,
-            hal_wifi_is_connected() ? "Server unreachable" : "No network connection");
+            hal_wifi_is_connected() ? tr(STR_SERVER_UNREACHABLE) : tr(STR_NO_NETWORK_CONNECTION));
         ESP_LOGW(TAG, "fetch_chart: 0 channels (genre=%d)", genre_id);
         return false;
     }
@@ -383,7 +384,7 @@ bool podcast_controller_fetch_chart_by_category(struct PodcastApp *app, int cat)
                  count, (unsigned)(count * sizeof(Channel)));
         free(bk);
         podcast_model_set_net_state(app, NET_STATE_ERROR,
-            "Memory allocation failed");
+            tr(STR_MEMORY_ALLOC_FAILED));
         return false;
     }
 
@@ -462,7 +463,7 @@ bool podcast_controller_fetch_channel_episodes(struct PodcastApp *app, int cid) 
     /* Blacklist: skip HTTP fetch for channels that previously returned 502/unreachable */
     if (rss_is_blacklisted(ctx, cid)) {
         memset(&ctx->feed_result, 0, sizeof(ctx->feed_result));
-        s_strcpy(ctx->feed_result.error, "Feed unavailable (blacklisted)",
+        s_strcpy(ctx->feed_result.error, tr(STR_FEED_BLACKLISTED),
                  sizeof(ctx->feed_result.error));
         ctx->feed_done = true;
         ctx->feed_ok = false;
@@ -547,7 +548,7 @@ void controller_process_rss(void) {
         if (!body) {
             const char *detail = http_last_error();
             s_strcpy(ctx->feed_result.error,
-                     detail && detail[0] ? detail : "Server unreachable",
+                     detail && detail[0] ? detail : tr(STR_SERVER_UNREACHABLE),
                      sizeof(ctx->feed_result.error));
             ctx->feed_ok = false;
             ctx->feed_done = true;
@@ -563,11 +564,11 @@ void controller_process_rss(void) {
             if (root) {
                 cJSON *e = cJSON_GetObjectItem(root, "error");
                 s_strcpy(ctx->feed_result.error,
-                         e && e->valuestring ? e->valuestring : "Server error",
+                         e && e->valuestring ? e->valuestring : tr(STR_SERVER_ERROR),
                          sizeof(ctx->feed_result.error));
                 cJSON_Delete(root);
             } else {
-                s_strcpy(ctx->feed_result.error, "Server error", sizeof(ctx->feed_result.error));
+                s_strcpy(ctx->feed_result.error, tr(STR_SERVER_ERROR), sizeof(ctx->feed_result.error));
             }
             http_free_response_body(body);
             ctx->feed_ok = false;
@@ -1240,7 +1241,7 @@ void podcast_controller_play_episode(struct PodcastApp *app, int eid) {
     if (!media[0]) return;
 
     if (strncmp(media, "/sdcard/", 8) != 0 && podcast_is_m4a_url(ep->audio_url)) {
-        lv_toast_show("M4A 请先下载后播放", 3000);
+        lv_toast_show(tr(STR_M4A_NEED_DOWNLOAD), 3000);
         ESP_LOGI(TAG, "play: remote M4A requires download before playback");
         podcast_model_set_playing(app, false);
         return;
@@ -1255,7 +1256,7 @@ void podcast_controller_play_episode(struct PodcastApp *app, int eid) {
         struct stat st;
         if (stat(media, &st) != 0 || st.st_size == 0) {
             ESP_LOGW(TAG, "play: local file empty/missing: %s", media);
-            lv_toast_show("This download is empty or corrupt", 2500);
+            lv_toast_show(tr(STR_DOWNLOAD_EMPTY), 2500);
             podcast_model_set_playing(app, false);
             return;
         }
@@ -1323,10 +1324,10 @@ bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char 
 
 bool podcast_controller_login(struct PodcastApp *app, const char *n, const char *p,
     const char *cp, bool registering, bool ag, const char **err) {
-    if (!n||strlen(n)<2) {*err="Name too short";return false;}
-    if (!p||strlen(p)<4) {*err="Password too short";return false;}
-    if (registering && (!cp || strcmp(p,cp))) {*err="Mismatch";return false;}
-    if (!ag) {*err="Agree";return false;}
+    if (!n||strlen(n)<2) {*err=tr(STR_NAME_TOO_SHORT);return false;}
+    if (!p||strlen(p)<4) {*err=tr(STR_PASSWORD_TOO_SHORT);return false;}
+    if (registering && (!cp || strcmp(p,cp))) {*err=tr(STR_PASSWORD_MISMATCH);return false;}
+    if (!ag) {*err=tr(STR_AGREE);return false;}
 
     /* Determine endpoint: register if passwords differ (confirm-password mode),
      * otherwise login. */
@@ -1348,7 +1349,7 @@ bool podcast_controller_login(struct PodcastApp *app, const char *n, const char 
     char *resp = http_post_json_sync(url, json, &status, &len);
 
     if (!resp || status == 0) {
-        *err = "Server unreachable";
+        *err = tr(STR_SERVER_UNREACHABLE);
         ESP_LOGW(TAG, "Server unreachable");
         if (resp) http_free_response_body(resp);
         return false;
@@ -1357,7 +1358,7 @@ bool podcast_controller_login(struct PodcastApp *app, const char *n, const char 
     if (status != 200 && status != 201) {
         /* Try to extract error message from JSON response */
         cJSON *root = cJSON_Parse(resp);
-        const char *msg = "Server error";
+        const char *msg = tr(STR_SERVER_ERROR);
         static char err_buf[128];
         if (root) {
             cJSON *e = cJSON_GetObjectItem(root, "error");
@@ -1379,7 +1380,7 @@ bool podcast_controller_login(struct PodcastApp *app, const char *n, const char 
     }
 
     if (!uid) {
-        *err = "Invalid server response";
+        *err = tr(STR_INVALID_SERVER_RESPONSE);
         ESP_LOGW(TAG, "No user_id in response");
         if (root) cJSON_Delete(root);
         http_free_response_body(resp);
