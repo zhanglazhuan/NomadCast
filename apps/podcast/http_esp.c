@@ -330,6 +330,7 @@ bool http_download_to_file(const char *url, const char *file_path,
         int total = (int)base_offset, last_log = total;
         bool first_chunk = true;
         bool aborted = false;
+        bool caller_abort = false;
         int64_t read_us = 0, write_us = 0;   /* diagnostic: network vs SD split */
         int64_t win_start_us = esp_timer_get_time();  /* speed-window start */
         int     win_bytes    = 0;                      /* bytes since window start */
@@ -377,8 +378,8 @@ bool http_download_to_file(const char *url, const char *file_path,
                  * skips its speed smoothing when speed_bps is 0, so calling it
                  * between window boundaries is cheap. */
                 if (progress_cb && !progress_cb(total, (int)full_size, speed_bps)) {
-                    ESP_LOGW(TAG, "dl: aborted by caller");
-                    aborted = true;
+                    ESP_LOGW(TAG, "dl: soft-aborted by caller");
+                    caller_abort = true;
                     break;
                 }
 
@@ -404,6 +405,14 @@ bool http_download_to_file(const char *url, const char *file_path,
         if (aborted) {
             unlink(file_path);
             ESP_LOGW(TAG, "dl: removed partial file %s", file_path);
+            return false;
+        }
+        if (caller_abort) {
+            /* Soft abort (pause / exit / yield-to-audio): keep the verified
+             * prefix so the next attempt resumes via Range instead of
+             * restarting from 0. (A hard user *cancel* still removes the file:
+             * the worker unlinks it after the task record is gone.) */
+            ESP_LOGI(TAG, "dl: kept partial %s (%d bytes) for resume", file_path, total);
             return false;
         }
 

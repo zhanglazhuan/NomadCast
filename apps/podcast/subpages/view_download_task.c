@@ -719,6 +719,9 @@ static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_dat
     lv_obj_set_style_border_width(list_container, 0, 0);
     lv_obj_set_style_bg_color(list_container, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_pad_all(list_container, 0, 0);
+    /* 底部预留操作栏高度：勾选后操作栏浮在列表之上（吸底），若不加内边距，
+     * 滚动到底时最后一条会被操作栏遮住。44px 覆盖 40px 栏高 + 阴影余量。 */
+    lv_obj_set_style_pad_bottom(list_container, 44, 0);
     lv_obj_set_flex_flow(list_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(list_container, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list_container, LV_SCROLLBAR_MODE_AUTO);

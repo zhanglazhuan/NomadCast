@@ -19,13 +19,6 @@
 
 static const char *TAG = "task_store";
 
-/* Before SNTP sync, time(NULL) returns RTC uptime (a tiny value, e.g. < 1e6 s),
- * NOT real epoch time.  A task created while the clock was unsynced stores that
- * bogus value in created_at; on the next boot (clock now synced) it would be
- * mistaken for "expired 3 days ago" and dropped.  Guard TTL filtering so any
- * created_at below this floor is treated as "clock was unsynced" and kept. */
-static const time_t TIME_FLOOR = 1000000000;   /* ~2001, far below any real date */
-
 /* Ensure the directory exists (mkdir -p). */
 static void ensure_dir(void) {
     struct stat st;
@@ -164,8 +157,7 @@ int task_store_load(struct PodcastApp *app) {
     DIR *d = opendir(TASK_STORE_DIR);
     if (!d) { podcast_model_download_unlock(app); return 0; }
 
-    /* Count eligible tasks first */
-    time_t cutoff = time(NULL) - TASK_TTL_DAYS * 86400;
+    /* Count valid tasks first */
     int count = 0;
 
     struct dirent *de;
@@ -179,8 +171,7 @@ int task_store_load(struct PodcastApp *app) {
         char line[2048];
         if (fgets(line, sizeof(line), f)) {
             DownloadTask tmp;
-            if (task_from_json(line, &tmp) &&
-                (tmp.created_at >= cutoff || tmp.created_at < TIME_FLOOR))
+            if (task_from_json(line, &tmp))
                 count++;
         }
         fclose(f);
@@ -205,8 +196,7 @@ int task_store_load(struct PodcastApp *app) {
         char line[2048];
         if (fgets(line, sizeof(line), f)) {
             DownloadTask tmp;
-            if (task_from_json(line, &tmp) &&
-                (tmp.created_at >= cutoff || tmp.created_at < TIME_FLOOR)) {
+            if (task_from_json(line, &tmp)) {
                 m->download_tasks[m->download_task_count++] = tmp;
             }
         }
@@ -214,10 +204,7 @@ int task_store_load(struct PodcastApp *app) {
     }
     closedir(d);
 
-    /* Purge old tasks in background */
-    task_store_purge_old();
-
-    ESP_LOGI(TAG, "Loaded %d tasks (cutoff %lld)", m->download_task_count, (long long)cutoff);
+    ESP_LOGI(TAG, "Loaded %d tasks", m->download_task_count);
     podcast_model_download_unlock(app);
     return m->download_task_count;
 }
@@ -307,34 +294,4 @@ void task_store_delete(struct PodcastApp *app, int task_id) {
     m->download_task_count--;
     ESP_LOGI(TAG, "Deleted task %d", task_id);
     podcast_model_download_unlock(app);
-}
-
-void task_store_purge_old(void) {
-    time_t cutoff = time(NULL) - TASK_TTL_DAYS * 86400;
-    DIR *d = opendir(TASK_STORE_DIR);
-    if (!d) return;
-
-    struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.') continue;
-        char path[512];
-        snprintf(path, sizeof(path), "%s/%s", TASK_STORE_DIR, de->d_name);
-        FILE *f = fopen(path, "r");
-        if (!f) { unlink(path); continue; }
-
-        char line[2048];
-        bool expired = false;
-        if (fgets(line, sizeof(line), f)) {
-            DownloadTask tmp;
-            if (task_from_json(line, &tmp) &&
-                tmp.created_at < cutoff && tmp.created_at >= TIME_FLOOR)
-                expired = true;
-        }
-        fclose(f);
-        if (expired) {
-            ESP_LOGI(TAG, "Purge old: %s", de->d_name);
-            unlink(path);
-        }
-    }
-    closedir(d);
 }

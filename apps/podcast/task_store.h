@@ -9,10 +9,14 @@
  *       .next_id         ← "3"  (next id to assign)
  *
  * Lifecycle:
- *   1. task_store_load()  — scan dir, filter ts > now-3d, populate model array
+ *   1. task_store_load()  — scan dir, populate model array (all tasks)
  *   2. task_store_create() — write new .json + append to model array
  *   3. task_store_update() — rewrite single .json on status change
  *   4. task_store_delete() — unlink + remove from model
+ *
+ * Tasks persist indefinitely — only an explicit user delete removes them.
+ * (No TTL purge: the user expects a queued/failed task to still be there and
+ * re-download on the next launch.)
  */
 #ifndef TASK_STORE_H
 #define TASK_STORE_H
@@ -25,10 +29,9 @@ extern "C" {
 #endif
 
 #define TASK_STORE_DIR  "/sdcard/.nomadcast/cache/download_tasks"
-#define TASK_TTL_DAYS   3
 
-/** Scan the directory and populate model->download_tasks[] with tasks
- *  created in the last TASK_TTL_DAYS.  Returns the loaded count. */
+/** Scan the directory and populate model->download_tasks[] with every
+ *  persisted task (no age filter).  Returns the loaded count. */
 int  task_store_load(struct PodcastApp *app);
 
 /** Create a new PENDING task — writes file + adds to model array.
@@ -45,9 +48,6 @@ void task_store_update(struct PodcastApp *app, int task_id);
 
 /** Delete a task — unlink file + compact the model array. */
 void task_store_delete(struct PodcastApp *app, int task_id);
-
-/** Purge tasks older than TASK_TTL_DAYS (called at boot). */
-void task_store_purge_old(void);
 
 #ifdef __cplusplus
 }

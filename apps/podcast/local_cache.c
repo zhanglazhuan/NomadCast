@@ -277,14 +277,16 @@ static bool read_u64_at(FILE *f, long off, uint64_t *out) {
     return true;
 }
 
-/* Probe a local .m4a: is it a complete, playable file, and (optionally) how
- * long is it?  Xiaoyuzhou encodes these with the moov atom at the END of the
- * file, so a truncated download still has a valid ftyp up front but no moov —
- * the decoder then can't identify it ("Detect audio type is PCM") and playback
- * fails.  A complete file always carries moov; scanning the top-level box
- * headers is a handful of 8-byte reads + seeks, O(top-level boxes), not
- * O(file size).  duration_sec, when non-NULL, is filled from moov→mvhd
- * (timescale/duration); left 0 if unknown. */
+/* Probe a local .m4a: is it a COMPLETE, playable file, and (optionally) how
+ * long is it?  "Complete" means the top-level boxes tile cleanly to EOF — a
+ * truncated download has its trailing (mdat) box cut short, so the walk stops
+ * before EOF.  Merely finding a moov atom is NOT enough: some encoders put
+ * moov at the END (a truncated file then lacks moov), but "fast-start" files
+ * put moov at the FRONT, so a partial download of those still has a valid moov
+ * and would otherwise look complete.  Walking the box headers is a handful of
+ * 8-byte reads + seeks, O(top-level boxes), not O(file size).  duration_sec,
+ * when non-NULL, is filled from moov→mvhd (timescale/duration); left 0 if
+ * unknown. */
 static bool mp4_probe(const char *path, int *duration_sec) {
     FILE *f = fopen(path, "rb");
     if (!f) return false;
@@ -293,8 +295,13 @@ static bool mp4_probe(const char *path, int *duration_sec) {
     if (file_size < 8) { fclose(f); return false; }
     if (duration_sec) *duration_sec = 0;
 
-    /* Pass 1 — find the top-level moov box. */
+    /* Pass 1 — walk the top-level boxes. Find moov (for the duration below)
+     * and verify the file is COMPLETE: every box must tile cleanly to EOF.
+     * A partial download has its last (mdat) box truncated, so the walk stops
+     * short of EOF. Merely "has a moov atom" is not enough — fast-start M4A
+     * files put moov at the front, so a partial file still contains moov. */
     long moov_payload = -1, moov_len = 0;
+    bool complete = false;
     long off = 0;
     while (off >= 0 && file_size - off >= 8) {
         if (fseek(f, off, SEEK_SET) != 0) break;
@@ -322,11 +329,11 @@ static bool mp4_probe(const char *path, int *duration_sec) {
         if (strcmp(type, "moov") == 0) {
             moov_payload = off + (long)hdr_sz;
             moov_len = (long)(size - hdr_sz);
-            break;
         }
         off += (long)size;
+        if (off == file_size) { complete = true; break; }
     }
-    bool has_moov = (moov_payload >= 0);
+    bool has_moov = (moov_payload >= 0) && complete;
 
     /* Pass 2 — inside moov, find mvhd and read the duration. */
     if (has_moov && duration_sec && moov_len >= 8) {
@@ -442,8 +449,9 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
             size_t len = strlen(fde->d_name);
             if (len < 5 || strcmp(fde->d_name + len - 4, ".m4a") != 0) continue;
 
-            /* Index only complete M4A files — skip empty and truncated ones
-             * (a failed/partial download lacks the trailing moov atom). */
+            /* Index only complete M4A files — skip empty and truncated ones.
+             * mp4_probe verifies the boxes tile to EOF, so a partial download
+             * (truncated mdat) is rejected even when moov sits at the front. */
             char fpath[640];
             snprintf(fpath, sizeof(fpath), "%s/%s", chdir, fde->d_name);
             int dur = 0;

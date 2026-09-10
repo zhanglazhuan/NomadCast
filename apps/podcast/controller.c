@@ -842,8 +842,9 @@ static void dl_worker_task(void *arg)
             int idx = dl_find_index(app->model, task_id);
             podcast_model_download_unlock(app);
             if (idx < 0) {
-                /* Cancelled mid-flight: on abort http already unlinked the
-                 * partial; if it finished before the cancel landed, remove the
+                /* Cancelled mid-flight: http keeps the partial on a soft abort
+                 * (so pause/exit can resume), so remove it here. If the transfer
+                 * finished just before the cancel landed, this also clears the
                  * now-orphaned file. */
                 remove(s_path);
                 ESP_LOGI(TAG, "dl: task %d cancelled — file removed", task_id);
@@ -858,17 +859,27 @@ static void dl_worker_task(void *arg)
                 /* Paused for playback: keep PENDING (in RAM only — avoid an SD
                  * write while audio holds the memory) and stop draining. Resumes
                  * on the next re-scan after playback ends; on reboot dl_resume
-                 * turns the persisted DOWNLOADING back into PENDING. Re-downloads
-                 * from the start (the partial was unlinked on abort). */
+                 * turns the persisted DOWNLOADING back into PENDING. The partial
+                 * is kept, so the next attempt resumes via Range. */
                 dl_set_status(app, task_id, DOWNLOAD_STATUS_PENDING, 0);
                 ESP_LOGI(TAG, "dl: task %d paused for playback (will resume)", task_id);
                 break;
             } else if (ctx->dl.user_paused) {
                 /* User pressed Pause: keep the task PENDING and stop draining.
-                 * The partial was unlinked on abort, so resume re-downloads from
-                 * the start. RAM-only status — the worker now parks until resume. */
+                 * The partial is kept, so resume continues via Range instead of
+                 * re-downloading from the start. RAM-only status — the worker
+                 * now parks until resume. */
                 dl_set_status(app, task_id, DOWNLOAD_STATUS_PENDING, 0);
                 ESP_LOGI(TAG, "dl: task %d paused by user (will resume)", task_id);
+                break;
+            } else if (ctx->dl.abort_current) {
+                /* App is shutting down (exit) — not a real failure. Leave the
+                 * task PENDING and persist it so it resumes on next launch.
+                 * A user *cancel* never reaches here: cancel deletes the task
+                 * from the model first, so the idx < 0 branch above handles it. */
+                dl_set_status(app, task_id, DOWNLOAD_STATUS_PENDING, 0);
+                task_store_update(app, task_id);
+                ESP_LOGI(TAG, "dl: task %d aborted on exit — kept PENDING", task_id);
                 break;
             } else {
                 dl_set_status(app, task_id, DOWNLOAD_STATUS_FAILED, 0);
@@ -923,8 +934,20 @@ static void dl_resume_pending(PodcastApp *app)
     podcast_model_download_lock(app);
     for (int i = 0; i < m->download_task_count; i++) {
         DownloadTask *t = &m->download_tasks[i];
-        if (t->status == DOWNLOAD_STATUS_DOWNLOADING) {
-            /* Was mid-download when power cut — reset to PENDING */
+        if (t->status == DOWNLOAD_STATUS_DOWNLOADING ||
+            t->status == DOWNLOAD_STATUS_FAILED) {
+            /* Skip the task the worker is actively downloading: resetting it
+             * mid-transfer (e.g. a WiFi-reconnect blip while the screen is off)
+             * would discard its in-flight bytes and restart it from 0. A stale
+             * DOWNLOADING task left by a reboot has no active transfer, so it
+             * is reset normally. */
+            if (ctx->dl.active && t->id == ctx->dl.current_task_id)
+                continue;
+            /* Was mid-download when power cut (DOWNLOADING), or a previous
+             * session ended with a transient failure (FAILED) — re-queue it so
+             * the task resumes on this boot. Re-downloads from the start when
+             * the partial file is gone; otherwise http resume picks up where it
+             * left off. Only a user delete removes a task permanently. */
             t->status = DOWNLOAD_STATUS_PENDING;
             t->progress = 0;
             if (reset_count < 64) reset_ids[reset_count++] = t->id;
