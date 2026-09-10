@@ -85,6 +85,7 @@ static void on_checkbox_changed(lv_event_t *e) {
 
 static void on_track_clicked(lv_event_t *e) {
     lv_obj_t *row = lv_event_get_current_target_obj(e);
+    ChannelPageCtx *ctx = (ChannelPageCtx *)lv_event_get_user_data(e);
 
     /* A swipe (scroll gesture) must not fire the tap handler — see the same
      * check in view_local.c/on_card_clicked. */
@@ -93,17 +94,29 @@ static void on_track_clicked(lv_event_t *e) {
 
     int track_id = (int)(uintptr_t)lv_obj_get_user_data(row);
 
-    /* Remote M4A can't stream (server transcode is disabled) — it must be
-     * downloaded first. Stay on this page and toast instead of jumping to
-     * the player page. */
-    if (!podcast_controller_episode_playable(&g_podcast_app, track_id)) {
-        lv_toast_show(tr(STR_M4A_NEED_DOWNLOAD), 2000);
+    /* Downloaded episode → play directly. */
+    if (podcast_controller_episode_playable(&g_podcast_app, track_id)) {
+        int *id_ptr = malloc(sizeof(int));
+        *id_ptr = track_id;
+        PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, id_ptr);
         return;
     }
 
-    int *id_ptr = malloc(sizeof(int));
-    *id_ptr = track_id;
-    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, id_ptr);
+    /* Un-downloaded M4A can't stream (server transcode is disabled). Instead of
+     * jumping to the player, toggle this row's checkbox so it can be queued for
+     * download via the bottom "Download" action. */
+    if (!ctx) return;
+    for (int i = 0; i < ctx->episode_count; i++) {
+        if (!ctx->track_cbs[i]) continue;   /* downloaded — not selectable */
+        lv_obj_t *r = lv_obj_get_parent(ctx->track_cbs[i]);
+        if ((int)(uintptr_t)lv_obj_get_user_data(r) != track_id) continue;
+        bool checked = !ctx->track_checked[i];
+        ctx->track_checked[i] = checked;
+        if (checked) lv_obj_add_state(ctx->track_cbs[i], LV_STATE_CHECKED);
+        else         lv_obj_remove_state(ctx->track_cbs[i], LV_STATE_CHECKED);
+        update_sel_label(ctx);
+        return;
+    }
 }
 
 static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int index, int episode_num, ChannelPageCtx *ctx) {
@@ -116,7 +129,7 @@ static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int in
     lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_clip_corner(row, true, 0);
     lv_obj_set_user_data(row, (void *)(uintptr_t)track->id);
-    lv_obj_add_event_cb(row, on_track_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(row, on_track_clicked, LV_EVENT_CLICKED, ctx);
 
     /* In a NETWORK channel, an already-downloaded episode shows a green check
      * instead of a selectable checkbox — re-downloading is pointless, and the
@@ -345,6 +358,14 @@ static void on_play_selected_clicked(lv_event_t *e) {
     for (int i = 0; i < ctx->episode_count; i++)
         if (ctx->track_checked[i]) n++;
     if (n == 0) return;
+
+    /* Network channel: checked episodes are un-downloaded M4A (downloaded ones
+     * show a green check and aren't selectable) — they can't stream, so hint
+     * instead of jumping to the player. */
+    if (!ctx->is_local) {
+        lv_toast_show(tr(STR_M4A_NEED_DOWNLOAD), 2000);
+        return;
+    }
 
     int *ids = (int *)malloc(sizeof(int) * n);
     if (!ids) return;
