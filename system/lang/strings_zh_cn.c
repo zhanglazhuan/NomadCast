@@ -165,8 +165,8 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "继续",
     "暂停",
     "删除选中的任务？\n（已下载的文件保留；\n未完成的将被移除。）",
-    "秒",
-    "分钟",
+    "%d秒",
+    "%d分钟",
 
     /* Podcast — settings */
     "国家/地区",

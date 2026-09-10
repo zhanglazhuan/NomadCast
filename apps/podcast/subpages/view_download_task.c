@@ -22,6 +22,7 @@ extern PodcastApp g_podcast_app;
 
 /* ---- 页面上下文 ---- */
 #define DL_PER_PAGE 20
+#define DL_ETA_REFRESH_MS 3000   /* "预计"刷新间隔：每 3s 重算一次 */
 
 /* 任务行标题滚动区几何。行内容宽 = 240 - 2*8 (page.container pad_all=8)。 */
 #define DL_ROW_W       224   /* 行内容宽度 (px) */
@@ -51,14 +52,17 @@ typedef struct DownloadTaskPageCtx_s {
     lv_obj_t* row_status_labels[DL_PER_PAGE];
     int       row_task_ids[DL_PER_PAGE];
     int       row_visible;
+    lv_obj_t* eta_label;        /* 统计卡片"预计"数值标签，供定时器刷新 */
 } DownloadTaskPageCtx;
 
 static DownloadTaskPageCtx *s_active_dl_page = NULL;
 static lv_timer_t *s_dl_refresh_timer = NULL;   /* 单例：500ms 刷新下载百分比 */
+static uint32_t s_dl_eta_tick = 0;              /* ETA 刷新节拍计数（500ms/拍） */
 
 static void dl_prev_page(lv_event_t *e);
 static void dl_next_page(lv_event_t *e);
 static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx);
+static void calc_est_time(struct PodcastApp* app, char* buf, int buf_size);
 
 /* ---- Download-complete event → refresh page via navigator ---- */
 
@@ -108,6 +112,16 @@ static void dl_refresh_progress_cb(lv_timer_t* t) {
                 lv_label_set_text_fmt(lbl, "%d%%", m->download_tasks[i].progress);
                 break;
             }
+        }
+    }
+
+    /* 每 DL_ETA_REFRESH_MS 刷新一次"预计"：剩余字节 / 实测网速 */
+    if (++s_dl_eta_tick >= (DL_ETA_REFRESH_MS / 500)) {
+        s_dl_eta_tick = 0;
+        if (ctx->eta_label && lv_obj_is_valid(ctx->eta_label)) {
+            char est_buf[32];
+            calc_est_time(ctx->app, est_buf, sizeof(est_buf));
+            lv_label_set_text(ctx->eta_label, est_buf);
         }
     }
 }
@@ -318,7 +332,7 @@ static void on_delete_clicked(lv_event_t* e) {
 }
 
 /* ---- 构建统计卡片 ---- */
-static lv_obj_t* build_stats_card(lv_obj_t* parent, struct PodcastApp* app) {
+static lv_obj_t* build_stats_card(lv_obj_t* parent, struct PodcastApp* app, DownloadTaskPageCtx* ctx) {
     lv_obj_t* card = lv_obj_create(parent);
     lv_obj_set_size(card, LV_PCT(100), 64);
     lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), 0);
@@ -359,6 +373,7 @@ static lv_obj_t* build_stats_card(lv_obj_t* parent, struct PodcastApp* app) {
         lv_color_t vcolor = (i == 2 && failed > 0)
                           ? lv_color_hex(0xD32F2F) : lv_color_hex(0x1976D2);
         lv_obj_set_style_text_color(v, vcolor, 0);
+        if (i == 3) ctx->eta_label = v;   /* 记住"预计"标签，供定时器刷新 */
 
         lv_obj_t* l = lv_label_create(item);
         lv_label_set_text(l, labels[i]);
@@ -707,7 +722,7 @@ static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_dat
     }
 
     /* 统计卡片 */
-    build_stats_card(page.container, app);
+    build_stats_card(page.container, app, ctx);
 
     /* 表头 (全选 switch | ALL | Title | Status) */
     build_list_header(page.container, ctx);

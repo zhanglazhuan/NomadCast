@@ -165,8 +165,8 @@ const char *const strings_en[STR_COUNT] = {
     "Resume",
     "Pause",
     "Delete selected tasks?\n(Downloaded files are kept;\nunfinished ones are removed.)",
-    "sec",
-    "min",
+    "%d sec",
+    "%d min",
 
     /* Podcast — settings */
     "Country",
