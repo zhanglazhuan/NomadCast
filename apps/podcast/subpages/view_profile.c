@@ -160,7 +160,9 @@ static void dl_count_refresh_cb(lv_timer_t *t) {
 }
 
 static void on_profile_page_delete(lv_event_t *e) {
+    ProfilePageCtx *ctx = (ProfilePageCtx *)lv_event_get_user_data(e);
     if (g_profile_dl_timer) { lv_timer_del(g_profile_dl_timer); g_profile_dl_timer = NULL; }
+    if (ctx) free(ctx);
 }
 
 static void on_download_task_clicked(lv_event_t* e) {
@@ -178,10 +180,8 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     (void)user_data;
 
     /* 页面上下文 (生命周期同页面) */
-    if (app->view->page_nav.nav_ctx) free(app->view->page_nav.nav_ctx);
     ProfilePageCtx* ctx = malloc(sizeof(ProfilePageCtx));
     memset(ctx, 0, sizeof(ProfilePageCtx));
-    app->view->page_nav.nav_ctx = ctx;
 
     Page page = lv_page_create(NULL, false, NULL, NULL);
     lv_obj_set_flex_grow(page.container, 1);  /* 填满剩余高度 */
@@ -313,7 +313,7 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     if (g_profile_dl_timer) lv_timer_del(g_profile_dl_timer);
     g_profile_dl_timer = lv_timer_create(dl_count_refresh_cb, 2000, (void *)dt_t);
     /* Clean up timer when page is destroyed */
-    lv_obj_add_event_cb(page.screen, on_profile_page_delete, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(page.screen, on_profile_page_delete, LV_EVENT_DELETE, ctx);
 
     lv_obj_t* settings_btn = lv_button_create(main);
     lv_obj_set_size(settings_btn, LV_PCT(100), 42);

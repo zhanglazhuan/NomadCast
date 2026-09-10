@@ -589,14 +589,20 @@ static lv_obj_t *build_action_bar(lv_obj_t *parent, ChannelPageCtx *ctx, int cha
     return bar;
 }
 
-static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
-    (void)user_data;
+static void channel_ctx_cleanup(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (!ctx) return;
+    if (ctx->poll_timer) { lv_timer_del(ctx->poll_timer); ctx->poll_timer = NULL; }
+    if (ctx->track_checked) { free(ctx->track_checked); ctx->track_checked = NULL; }
+    if (ctx->track_cbs) { free(ctx->track_cbs); ctx->track_cbs = NULL; }
+    free(ctx);
+}
 
+static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     int channel_id = 0;
-    if (app->view->page_nav.nav_ctx) {
-        channel_id = *(int *)app->view->page_nav.nav_ctx;
-        free(app->view->page_nav.nav_ctx);
-        app->view->page_nav.nav_ctx = NULL;
+    if (user_data) {
+        channel_id = *(int *)user_data;
+        free(user_data);
     } else {
         /* Popping back from player/sub-page — restore from current channel.
          * Local channel pages do not populate current_channel, so recover the
@@ -631,7 +637,7 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     ctx->cur_page = 0;
     ctx->total_pages = 1;
     ctx->is_local = (channel && channel->downloaded);
-    app->view->page_nav.nav_ctx = ctx;
+    lv_obj_add_event_cb(page.screen, channel_ctx_cleanup, LV_EVENT_DELETE, ctx);
 
     /* Info button — shows channel details in bottom sheet */
     if (page.header_right) {

@@ -122,6 +122,8 @@ static void on_page_delete(lv_event_t* e) {
     NetworkPage* np = lv_event_get_user_data(e);
     if (!np) return;
     stop_all_timers(np);
+    if (np->ctx) { free(np->ctx); np->ctx = NULL; }
+    free(np);
     printf("[INF] Network page timers stopped\n"); fflush(stdout);
 }
 
@@ -182,9 +184,7 @@ static void poll_ready_cb(lv_timer_t* timer) {
         lv_obj_clean(np->container);
         NetworkPageCtx* ctx = malloc(sizeof(NetworkPageCtx));
         memset(ctx, 0, sizeof(NetworkPageCtx));
-        if (g_podcast_app.view->page_nav.nav_ctx)
-            free(g_podcast_app.view->page_nav.nav_ctx);
-        g_podcast_app.view->page_nav.nav_ctx = ctx;
+        np->ctx = ctx;
         build_online_content(ctx, np->container);
         np->content_built = true;
         printf("[INF] Network page built (online) container=%p screen=%p active_screen=%p\n",
@@ -394,8 +394,8 @@ static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
 /* ── 搜索 / 本地链接 ───────────────────────────────────────────────────── */
 
 static void on_forward_clicked(lv_event_t* e) {
-    (void)e;
-    NetworkPageCtx* ctx = g_podcast_app.view->page_nav.nav_ctx;
+    NetworkPage* np = (NetworkPage*)lv_event_get_user_data(e);
+    NetworkPageCtx* ctx = np ? np->ctx : NULL;
     if (!ctx || ctx->active_cat == CAT_ALL) return;
 
     channel_category_t cat = (channel_category_t)ctx->active_cat;
@@ -432,7 +432,7 @@ static void on_card_clicked(lv_event_t* e) {
 #define FAB_SIZE  40
 #define FAB_MARGIN_RIGHT 12
 
-static void create_forward_fab(lv_obj_t* screen) {
+static void create_forward_fab(lv_obj_t* screen, NetworkPage* np) {
     lv_obj_t* fab = lv_button_create(screen);
     lv_obj_set_size(fab, FAB_SIZE, FAB_SIZE);
     lv_obj_set_style_radius(fab, FAB_SIZE / 2, 0);
@@ -442,7 +442,7 @@ static void create_forward_fab(lv_obj_t* screen) {
     lv_obj_set_style_shadow_color(fab, lv_color_hex(0x000000), 0);
     lv_obj_set_style_shadow_opa(fab, LV_OPA_30, 0);
     lv_obj_add_flag(fab, LV_OBJ_FLAG_FLOATING);
-    lv_obj_add_event_cb(fab, on_forward_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(fab, on_forward_clicked, LV_EVENT_CLICKED, np);
     lv_obj_align(fab, LV_ALIGN_BOTTOM_RIGHT, -FAB_MARGIN_RIGHT, -96);
 
     lv_obj_t* img = lv_image_create(fab);
@@ -545,9 +545,7 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
             np->state = NP_STATE_ONLINE;
             NetworkPageCtx* ctx = malloc(sizeof(NetworkPageCtx));
             memset(ctx, 0, sizeof(NetworkPageCtx));
-            if (g_podcast_app.view->page_nav.nav_ctx)
-                free(g_podcast_app.view->page_nav.nav_ctx);
-            g_podcast_app.view->page_nav.nav_ctx = ctx;
+            np->ctx = ctx;
             build_online_content(ctx, np->container);
             np->content_built = true;
             printf("[INF] Network page built (cached)\n"); fflush(stdout);
@@ -570,7 +568,7 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
     }
 
     /* 前进按钮 + 底栏 (所有状态均显示) */
-    create_forward_fab(page.screen);
+    create_forward_fab(page.screen, np);
     podcast_view_create_bottom_tab_bar(page.screen, TAB_NETWORK);
 
     /* 页面销毁时清理定时器，防止切换 tab 崩溃 */

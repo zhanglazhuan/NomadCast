@@ -287,6 +287,14 @@ static void on_download_complete_event(app_event_t event, const void *data) {
 }
 
 /* ---- 页面构建 ---- */
+static void on_local_page_delete(lv_event_t *e) {
+    lv_obj_t *screen = lv_event_get_target(e);
+    if (s_local_screen == screen) {
+        s_local_screen = NULL;
+        if (s_local_ctx) { free(s_local_ctx); s_local_ctx = NULL; }
+    }
+}
+
 static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
     (void)user_data;
     Page page = lv_page_create(NULL, false, NULL, NULL);
@@ -316,10 +324,8 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
         build_hint(page.container, tr(STR_NO_AUDIO_DOWNLOADED), true);
         printf("[INF] Local page built (no content)\n"); fflush(stdout);
     } else {
-        if (app->view->page_nav.nav_ctx) free(app->view->page_nav.nav_ctx);
         LocalPageCtx* ctx = malloc(sizeof(LocalPageCtx));
         memset(ctx, 0, sizeof(LocalPageCtx));
-        app->view->page_nav.nav_ctx = ctx;
         s_local_ctx = ctx;
 
         /* Top bar: [search flex] --gap-- [dropdown 35%] = 95% wide */
@@ -379,6 +385,7 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
 
     podcast_view_create_bottom_tab_bar(page.screen, TAB_LOCAL);
     s_local_screen = page.screen;
+    lv_obj_add_event_cb(page.screen, on_local_page_delete, LV_EVENT_DELETE, NULL);
     return page.screen;
 }
 

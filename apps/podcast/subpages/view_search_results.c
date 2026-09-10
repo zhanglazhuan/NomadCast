@@ -133,19 +133,20 @@ static __attribute__((unused)) void poll_results_cb(lv_timer_t *timer) {
     printf("[INF] Search results built\n"); fflush(stdout);
 }
 
+static void search_results_cleanup(lv_event_t *e) {
+    SearchResultsPage *sp = lv_event_get_user_data(e);
+    if (!sp) return;
+    if (sp->poll_timer) { lv_timer_del(sp->poll_timer); sp->poll_timer = NULL; }
+    free(sp);
+}
+
 static lv_obj_t *build_search_results_page(struct PodcastApp *app, void *user_data) {
     (void)user_data;
-
-    /* Free old nav_ctx if any */
-    if (app->view->page_nav.nav_ctx) {
-        free(app->view->page_nav.nav_ctx);
-        app->view->page_nav.nav_ctx = NULL;
-    }
 
     Page page = lv_page_create(tr(STR_SEARCH_RESULTS), true, page_navigator_navigate_back, &app->view->page_nav);
 
     SearchResultsPage *sp = (SearchResultsPage *)calloc(1, sizeof(SearchResultsPage));
-    app->view->page_nav.nav_ctx = sp;
+    lv_obj_add_event_cb(page.screen, search_results_cleanup, LV_EVENT_DELETE, sp);
 
     lv_obj_t *main = page.container;
     lv_obj_set_flex_flow(main, LV_FLEX_FLOW_COLUMN);

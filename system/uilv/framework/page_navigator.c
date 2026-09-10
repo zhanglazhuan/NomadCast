@@ -47,10 +47,11 @@ void page_navigator_navigate_to(page_navigator_t *nav, app_handle_t app, int pag
 		return;
 	}
 
-	/* 旧上下文由 builder 自行释放 (在其 build 函数开头 free)，
-	 * 或由旧 screen 的 LV_EVENT_DELETE 回调释放。
-	 * 不在此处 free，避免与 delete 回调冲突导致双重释放。 */
-	nav->nav_ctx = user_data;
+	/* Page contexts are owned by their screen (lv_obj_set_user_data +
+	 * LV_EVENT_DELETE cleanup); builder input flows through `user_data`.
+	 * nav_ctx is a legacy shared slot — keep it NULL so a builder or async
+	 * timer can never free another page's context. */
+	nav->nav_ctx = NULL;
 
 	/* Build the new screen while the old one is still active so act_scr
 	 * is never dangling.  After loading the new screen, use async delete
@@ -111,7 +112,17 @@ bool page_navigator_navigate_pop(page_navigator_t *nav, app_handle_t app)
 void page_navigator_push(page_navigator_t *nav, int page_id)
 {
 	if (!nav || page_id <= 0) return;
-	if (nav->stack_top >= 9) return;
+	if (nav->stack_top >= 9) {
+		/* Stack full — evict the oldest entry so the top always reflects the
+		 * page the user actually came from.  Silently dropping the push here
+		 * makes a later navigate_pop return a stale (wrong) page: tab switches
+		 * push without popping, so ~10 switches fill the stack and the next
+		 * forward push (e.g. a channel card) gets dropped, causing the
+		 * Network↔Local tab-swap on back. */
+		for (int i = 0; i < 9; i++) nav->stack[i] = nav->stack[i + 1];
+		nav->stack[9] = page_id;
+		return;
+	}
 	nav->stack[++nav->stack_top] = page_id;
 }
 

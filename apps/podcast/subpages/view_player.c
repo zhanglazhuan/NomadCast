@@ -471,22 +471,19 @@ static void fmt_time(int sec, char* buf, int sz) {
 }
 
 static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
-    (void)user_data;
-
-    /* Determine whether we came from a channel episode (have nav_ctx) or
-     * from the tab bar (no nav_ctx).  Only show the back button when
+    /* Determine whether we came from a channel episode (have user_data) or
+     * from the tab bar (no user_data).  Only show the back button when
      * navigating from channel → player so the user can return to channel. */
-    bool from_channel = (app->view->page_nav.nav_ctx != NULL);
+    bool from_channel = (user_data != NULL);
 
     int eid = 0;
-    if (app->view->page_nav.nav_ctx) {
-        eid = *(int*)app->view->page_nav.nav_ctx;
-        free(app->view->page_nav.nav_ctx);
-        app->view->page_nav.nav_ctx = NULL;
+    if (user_data) {
+        eid = *(int*)user_data;
+        free(user_data);
         /* New episode selected — start playback */
         if (eid > 0) podcast_controller_play_episode(app, eid);
     }
-    /* Fallback: no nav_ctx means we're coming from tab bar — show what's playing */
+    /* Fallback: no user_data means we're coming from tab bar — show what's playing */
     if (eid == 0) eid = podcast_model_get_current_episode_id(app);
 
     const Episode* ep = podcast_model_get_episode_by_id(app, eid);

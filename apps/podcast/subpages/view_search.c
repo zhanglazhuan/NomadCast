@@ -117,10 +117,7 @@ static void ctx_cleanup_cb(lv_event_t *e) {
     lv_indev_t *indev = lv_indev_active();
     if (indev) lv_indev_remove_event_cb_with_user_data(indev, indev_press_filter, NULL);
     g_active_search_ctx = NULL;
-    if (ctx) {
-        free(ctx);
-        g_podcast_app.view->page_nav.nav_ctx = NULL;
-    }
+    if (ctx) free(ctx);
 }
 
 /* ── 键盘中英切换 (左下角 中/EN 键) ──────────────────────────────────────────
@@ -175,9 +172,7 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     (void)user_data;
     Page page = lv_page_create(tr(STR_SEARCH), true, page_navigator_navigate_back, &app->view->page_nav);
 
-    if (app->view->page_nav.nav_ctx) free(app->view->page_nav.nav_ctx);
     SearchPageCtx *ctx = (SearchPageCtx *)calloc(1, sizeof(SearchPageCtx));
-    app->view->page_nav.nav_ctx = ctx;
     lv_obj_add_event_cb(page.screen, ctx_cleanup_cb, LV_EVENT_DELETE, ctx);
 
     /* Search bar */
