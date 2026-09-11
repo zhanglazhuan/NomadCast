@@ -119,6 +119,13 @@ static void global_indev_event_cb(lv_event_t *e)
                 return;
             }
             ESP_LOGI(TAG, "→ Swipe-up → exit confirm");
+
+            /* Abort the rest of this release: clear the pending click AND any
+             * scroll so the swipe-up exits cleanly instead of also firing the
+             * pressed object's SHORT_CLICKED/CLICKED (e.g. entering a station)
+             * or scrolling the list under the dialog. */
+            lv_indev_reset(indev, NULL);
+
             show_exit_confirm_dialog();
             return;
         }

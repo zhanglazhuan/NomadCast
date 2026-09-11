@@ -4,6 +4,7 @@
 #include "../app.h"
 #include "../model.h"
 #include "../controller.h"
+#include "lv_home_indicator.h"
 #include "lang.h"
 
 extern PlayerApp g_player_app;
@@ -63,6 +64,9 @@ lv_obj_t* player_view_create_bottom_tab_bar(lv_obj_t* parent, player_main_tab_t 
 
         lv_obj_add_event_cb(btn, on_tab_clicked, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
     }
+
+    /* Home indicator floats over the tab bar's empty bottom margin. */
+    lv_home_indicator_create(parent);
 
     return bar;
 }

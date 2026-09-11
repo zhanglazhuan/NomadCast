@@ -2,6 +2,7 @@
 #include "view_tab_bar.h"
 #include "../view.h"
 #include "../app.h"
+#include "lv_home_indicator.h"
 #include "lang.h"
 
 extern PodcastApp g_podcast_app;
@@ -64,6 +65,9 @@ lv_obj_t* podcast_view_create_bottom_tab_bar(lv_obj_t* parent, main_tab_t active
 
         lv_obj_add_event_cb(btn, on_tab_clicked, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
     }
+
+    /* Home indicator floats over the tab bar's empty bottom margin. */
+    lv_home_indicator_create(parent);
 
     return bar;
 }

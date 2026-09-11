@@ -6,6 +6,7 @@ idf_component_register(
         "widgets/lv_toast.c"
         "widgets/lv_bottom_sheet.c"
         "widgets/lv_num_input.c"
+        "widgets/lv_home_indicator.c"
         "imgs/24x24/ic_timer.c"
         "imgs/24x24/ic_downloading.c"
         "imgs/24x24/ic_wifi.c"

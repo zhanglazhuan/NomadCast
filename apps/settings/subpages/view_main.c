@@ -9,6 +9,7 @@
 #include "../view.h"
 #include "../app.h"
 #include "lv_page.h"
+#include "lv_home_indicator.h"
 #include "lang.h"
 
 extern SettingsApp g_settings_app;
@@ -42,6 +43,7 @@ static lv_obj_t* build_main_page(struct SettingsApp* app, void* user_data) {
 
     Page page = lv_page_create(NULL, false, NULL, NULL);
     lv_obj_t* cont = page.container;
+    lv_home_indicator_create(page.screen);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 8, 0);
     lv_obj_set_style_pad_row(cont, 8, 0);

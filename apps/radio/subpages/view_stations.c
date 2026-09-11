@@ -7,6 +7,7 @@
 #include "../model.h"
 #include "../controller.h"
 #include "lv_page.h"
+#include "lv_home_indicator.h"
 #include "lang.h"
 
 extern RadioApp g_radio_app;
@@ -47,6 +48,7 @@ static lv_obj_t *build_stations_page(struct RadioApp *app, void *user_data) {
 
     Page page = lv_page_create(tr(STR_RADIO_STATIONS), false, NULL, NULL);
     lv_obj_t *cont = page.container;
+    lv_home_indicator_create(page.screen);
     lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(cont, 0, 0);
     lv_obj_set_style_pad_row(cont, 0, 0);
