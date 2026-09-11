@@ -53,6 +53,9 @@ const char *app_name_tr(const char *app_key) {
     if (strcmp(app_key, "Player") == 0) {
         return tr(STR_APP_PLAYER);
     }
+    if (strcmp(app_key, "Radio") == 0) {
+        return tr(STR_APP_RADIO);
+    }
     if (strcmp(app_key, "Settings") == 0) {
         return tr(STR_APP_SETTINGS);
     }

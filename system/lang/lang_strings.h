@@ -226,5 +226,12 @@ enum {
     STR_ICON_SIZE,
     STR_ICON_SIZE_OPTIONS,
 
+    /* Radio — app / stations / playback */
+    STR_APP_RADIO,
+    STR_RADIO_STATIONS,
+    STR_RADIO_LIVE,
+    STR_RADIO_FAILED_TO_PLAY,
+    STR_RADIO_NO_STATIONS,
+
     STR_COUNT
 };

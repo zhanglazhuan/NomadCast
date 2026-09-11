@@ -226,6 +226,12 @@ static bool pipeline_build(void)
         /* A zero range size means "from offset to EOF".  This is required for
          * pause/resume: http_stream will emit Range: bytes=<byte_pos>-. */
         http.request_range_size = 0;
+        /* Live streams have no known length and are jitter-prone.  The default
+         * 20KB ring buffer only absorbs ~1.5s at 128kbps; bump to 64KB so a
+         * brief network stall doesn't underrun the decoder and stutter audio.
+         * This only raises the max buffering depth — playback still starts as
+         * soon as the first frame arrives. */
+        http.out_rb_size = 64 * 1024;
         reader = http_stream_init(&http);
     } else {
         fatfs_stream_cfg_t fs = FATFS_STREAM_CFG_DEFAULT();

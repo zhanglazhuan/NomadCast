@@ -1,6 +1,6 @@
 idf_component_register(SRCS "NomadCast.cpp"
                     INCLUDE_DIRS "."
-                    REQUIRES lvgl esp_lcd driver esp_timer app_manager launcher settings podcast player input uilv flash_store sleep_monitor clock lang battery_monitor events audio_player ota gt911 monitor)
+                    REQUIRES lvgl esp_lcd driver esp_timer app_manager launcher settings podcast radio player input uilv flash_store sleep_monitor clock lang battery_monitor events audio_player ota gt911 monitor)
 
 target_include_directories(${COMPONENT_LIB} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../system/uilv/framework

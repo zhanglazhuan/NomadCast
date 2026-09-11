@@ -24,6 +24,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/settings
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/podcast
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/radio
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/player
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/esp-adf/components
 )

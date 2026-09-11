@@ -217,4 +217,11 @@ const char *const strings_zh_cn[STR_COUNT] = {
     /* Settings — General (icon size) */
     "图标大小",
     "中等\n大",
+
+    /* Radio — app / stations / playback */
+    "电台",
+    "电台列表",
+    "直播中",
+    "播放失败",
+    "暂无电台",
 };

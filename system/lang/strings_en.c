@@ -217,4 +217,11 @@ const char *const strings_en[STR_COUNT] = {
     /* Settings — General (icon size) */
     "Icon Size",
     "Medium\nLarge",
+
+    /* Radio — app / stations / playback */
+    "Radio",
+    "Stations",
+    "LIVE",
+    "Failed to play",
+    "No stations",
 };
