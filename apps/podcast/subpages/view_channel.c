@@ -87,10 +87,13 @@ static void on_track_clicked(lv_event_t *e) {
     lv_obj_t *row = lv_event_get_current_target_obj(e);
     ChannelPageCtx *ctx = (ChannelPageCtx *)lv_event_get_user_data(e);
 
-    /* A swipe (scroll gesture) must not fire the tap handler — see the same
-     * check in view_local.c/on_card_clicked. */
+    /* A swipe must not fire the tap handler. gesture_dir catches a flick (incl.
+     * at the scroll edge, where no scroll starts); press_moved catches any
+     * meaningful pointer movement during the press (see view_local.c). */
     lv_indev_t *indev = lv_indev_active();
-    if (indev && lv_indev_get_gesture_dir(indev) != LV_DIR_NONE) return;
+    if (indev && (lv_indev_get_gesture_dir(indev) != LV_DIR_NONE ||
+                  lv_indev_get_press_moved(indev)))
+        return;
 
     int track_id = (int)(uintptr_t)lv_obj_get_user_data(row);
 
