@@ -109,9 +109,13 @@ static void build_results_content(lv_obj_t *parent) {
             lv_obj_set_style_border_width(row, 0, 0);
             lv_obj_set_style_pad_all(row, 4, 0);
             char info[300];
-            int min = episode->duration_sec / 60;
-            int sec = episode->duration_sec % 60;
-            snprintf(info, sizeof(info), "%s  [%d:%02d]", episode->title, min, sec);
+            if (episode->duration_sec > 0) {
+                int min = episode->duration_sec / 60;
+                int sec = episode->duration_sec % 60;
+                snprintf(info, sizeof(info), "%s  [%d:%02d]", episode->title, min, sec);
+            } else {
+                snprintf(info, sizeof(info), "%s", episode->title);
+            }
             lv_obj_t *tl3 = lv_label_create(row);
             lv_label_set_text(tl3, info);
             lv_obj_center(tl3);

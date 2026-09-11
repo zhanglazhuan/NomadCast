@@ -91,6 +91,7 @@ typedef struct {
     int resume_sec;
     int64_t resume_byte;
     int last_time_sec;
+    int duration_sec;           /* true stream duration from the decoder (0 until known) */
     char uri[2600];
     char esp_uri[2600];
     volatile int volume;
@@ -491,6 +492,23 @@ void audio_player_process(void)
                      esp_err_to_name(err), info.sample_rates,
                      info.bits, info.channels);
         }
+
+        /* The decoder just parsed the container header — capture the true
+         * duration (moov/mvhd for M4A, frame scan for MP3) so the player's
+         * progress bar can stop trusting the possibly-wrong feed duration.
+         * ADF reports info.duration in MILLISECONDS. */
+        int d = info.duration > 0 ? info.duration / 1000 : 0;
+        if (d <= 0 && info.total_bytes > 0 && info.bps > 0)
+            d = (int)(info.total_bytes * 8 / info.bps);
+        if (d <= 0 && info.total_bytes > 0 && info.sample_rates > 0 &&
+            info.channels > 0 && info.bits > 0) {
+            int byte_rate = info.sample_rates * info.channels * (info.bits / 8);
+            if (byte_rate > 0) d = (int)(info.total_bytes / byte_rate);
+        }
+        ESP_LOGI(TAG, "info: dur_ms=%d total=%lld pos=%lld bps=%d rate=%d ch=%d bits=%d -> %ds",
+                 info.duration, (long long)info.total_bytes, (long long)info.byte_pos,
+                 info.bps, info.sample_rates, info.channels, info.bits, d);
+        if (d > 0) s_player.duration_sec = d;
     }
 }
 
@@ -509,6 +527,7 @@ bool audio_player_play(const char *url) {
     s_player.resume_sec    = 0;
     s_player.resume_byte   = 0;
     s_player.last_time_sec = 0;
+    s_player.duration_sec  = 0;
     to_esp_uri(url, s_player.esp_uri, sizeof(s_player.esp_uri));
     strncpy(s_player.uri, url, sizeof(s_player.uri) - 1);
 
@@ -527,6 +546,7 @@ void audio_player_stop(void) {
     s_player.released    = false;
     s_player.resume_sec  = 0;
     s_player.resume_byte = 0;
+    s_player.duration_sec = 0;
 }
 
 void audio_player_pause(bool pause) {
@@ -700,6 +720,8 @@ int audio_player_get_position_sec(void) {
     }
     return s_player.last_time_sec;
 }
+
+int audio_player_get_duration_sec(void) { return s_player.duration_sec; }
 
 bool audio_player_is_active(void) { return s_player.pipeline != NULL; }
 

@@ -197,6 +197,11 @@ const Channel **podcast_model_get_channels_by_category(struct PodcastApp *app, c
 const Episode *podcast_model_get_episode_by_id(struct PodcastApp *app, int episode_id);
 const Episode **podcast_model_get_episodes_by_channel(struct PodcastApp *app, int channel_id, int *out_count);
 
+/** Adopt a decoder-reported real duration (from a completed playback) into the
+ *  transient network stores that may still show a wrong feed itunes:duration.
+ *  Local-episode persistence is handled separately by cache_local_update_duration. */
+void podcast_model_update_episode_duration(struct PodcastApp *app, int episode_id, int duration_sec);
+
 /* ── Local content ───────────────────────────────────────────────────────── */
 
 const Channel **podcast_model_get_downloaded_channels_by_category(struct PodcastApp *app, channel_category_t cat, int *out_count);

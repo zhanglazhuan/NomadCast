@@ -394,6 +394,11 @@ bool cache_local_file_complete(const char *path) {
     return mp4_probe(path, NULL);
 }
 
+int cache_local_file_duration(const char *path) {
+    int dur = 0;
+    return mp4_probe(path, &dur) ? dur : 0;
+}
+
 /* Recover downloaded audio whose .meta bucket was lost (power cut before the
  * directory flush, or an SD card migrated without its index), or whose download
  * failed after the file was fully written (the task never registered the
@@ -531,7 +536,19 @@ static void prune_incomplete_local(struct PodcastApp *app) {
 
         char path[1536];
         local_audio_path(ch->title, e->title, path, sizeof(path));
-        if (mp4_probe(path, NULL)) {
+        int dur = 0;
+        if (mp4_probe(path, &dur)) {
+            if (dur > 0 && e->duration_sec != dur) {
+                printf("[DBG] prune: refresh id=%d ep='%s' %d -> %d\n",
+                       e->id, e->title, e->duration_sec, dur);
+                fflush(stdout);
+                e->duration_sec = dur;   /* refresh a wrong feed-provided duration */
+                changed = true;
+            } else {
+                printf("[DBG] prune: keep id=%d ep='%s' dur=%d (probe=%d)\n",
+                       e->id, e->title, e->duration_sec, dur);
+                fflush(stdout);
+            }
             if (write != i) m->local_episodes[write] = m->local_episodes[i];
             write++;
         } else {
@@ -613,7 +630,8 @@ void cache_local_init(struct PodcastApp *app) {
     }
     for (int i = 0; i < app->model->local_episode_count; i++) {
         Episode *e = &app->model->local_episodes[i];
-        printf("[DBG]   ep id=%d ch=%d title='%s'\n", e->id, e->channel_id, e->title);
+        printf("[DBG]   ep id=%d ch=%d dur=%d title='%s'\n",
+               e->id, e->channel_id, e->duration_sec, e->title);
     }
     fflush(stdout);
 }
@@ -628,6 +646,26 @@ void cache_local_add(struct PodcastApp *app,
     downloads_ensure_dir();
 
     /* Stable channel identity = collection_id (falls back to the transient cid). */
+    /* The feed's itunes:duration can be wrong (mis-tagged episode). For a
+     * completed local download, trust the real M4A duration read from the moov
+     * box, so the player's progress bar doesn't end early while audio keeps
+     * playing past the displayed end. */
+    if (path && path[0]) {
+        int real_dur = 0;
+        if (mp4_probe(path, &real_dur) && real_dur > 0) {
+            printf("[DBG] cache_local_add: ep='%s' feed_dur=%d real_dur=%d\n",
+                   ep_title ? ep_title : "", dur, real_dur);
+            fflush(stdout);
+            dur = real_dur;
+        } else {
+            printf("[DBG] cache_local_add: ep='%s' probe fail (feed_dur=%d) -> hide\n",
+                   ep_title ? ep_title : "", dur);
+            fflush(stdout);
+            dur = 0;   /* can't verify the real length — leave it unknown so the
+                        * list hides the duration instead of showing a stale feed value */
+        }
+    }
+
     int canon = (collection_id > 0) ? collection_id : cid;
     bool added = local_model_add(app, canon, collection_id, ch_title, eid, ep_title, url, dur);
 
@@ -643,6 +681,20 @@ void cache_local_add(struct PodcastApp *app,
         fprintf(logf, "[%s] cid=%d ch='%s' eid=%d ep='%s' dur=%ds\n",
                 ts, cid, ch_title ? ch_title : "", eid, ep_title ? ep_title : "", dur);
         fclose(logf);
+    }
+}
+
+void cache_local_update_duration(struct PodcastApp *app, int episode_id, int duration_sec)
+{
+    if (!app || !app->model || episode_id <= 0 || duration_sec <= 0) return;
+    PodcastModel *m = app->model;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        Episode *e = &m->local_episodes[i];
+        if (e->id != episode_id) continue;
+        if (e->duration_sec == duration_sec) return;   /* already correct */
+        e->duration_sec = duration_sec;
+        local_write_channel(app, e->channel_id);       /* persist to the bucket JSON */
+        return;
     }
 }
 

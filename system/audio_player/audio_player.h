@@ -36,6 +36,12 @@ int audio_player_get_volume(void);
 /** Current playback position in seconds (wall-clock, pause-aware; 0 when idle). */
 int audio_player_get_position_sec(void);
 
+/** True total duration in seconds of the currently playing stream, once the
+ *  decoder has reported its music info (from the M4A moov/mvhd or MP3 frame
+ *  scan).  0 until then, and 0 for streams whose duration is unknown.  This is
+ *  the authoritative duration — the feed's itunes:duration can be wrong. */
+int audio_player_get_duration_sec(void);
+
 /** Process decoder events and synchronize the I2S format. Call from main loop. */
 void audio_player_process(void);
 

@@ -170,11 +170,15 @@ static lv_obj_t *create_track_row(lv_obj_t *parent, const Episode *track, int in
     lv_obj_align(t, LV_ALIGN_LEFT_MID, 56, 0);
     lv_obj_set_style_text_color(t, lv_color_hex(0x333333), 0);
 
-    char ds[16]; format_duration(track->duration_sec, ds, sizeof(ds));
-    lv_obj_t *d = lv_label_create(row);
-    lv_label_set_text(d, ds);
-    lv_obj_align(d, LV_ALIGN_RIGHT_MID, -8, 0);
-    lv_obj_set_style_text_color(d, lv_color_hex(0x999999), 0);
+    /* Duration — hidden when unknown (duration_sec<=0) so an unverified feed
+     * value or a corrupt local file doesn't show a wrong "0:00"/"1:05". */
+    if (track->duration_sec > 0) {
+        char ds[16]; format_duration(track->duration_sec, ds, sizeof(ds));
+        lv_obj_t *d = lv_label_create(row);
+        lv_label_set_text(d, ds);
+        lv_obj_align(d, LV_ALIGN_RIGHT_MID, -8, 0);
+        lv_obj_set_style_text_color(d, lv_color_hex(0x999999), 0);
+    }
 
     lv_obj_t *line = lv_obj_create(row);
     lv_obj_set_size(line, LV_PCT(100), 1);

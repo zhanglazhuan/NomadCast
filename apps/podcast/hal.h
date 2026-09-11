@@ -39,6 +39,7 @@ static inline void hal_audio_play_file(const char *path) {
 static inline void hal_audio_stop(void)  { audio_player_stop(); }
 static inline void hal_audio_pause(bool pause) { audio_player_pause(pause); }
 static inline int  hal_audio_get_position_sec(void) { return audio_player_get_position_sec(); }
+static inline int  hal_audio_get_duration_sec(void) { return audio_player_get_duration_sec(); }
 #else
 /* PC: implemented in pc_demo/hal.c */
 bool hal_audio_play_file(const char *path);
@@ -46,6 +47,7 @@ void hal_audio_stop(void);
 void hal_audio_pause(bool pause);
 bool hal_audio_is_playing(void);
 int  hal_audio_get_position_sec(void);
+int  hal_audio_get_duration_sec(void);
 #endif
 
 /* ── Stubs ────────────────────────────────────────────────────────────────── */

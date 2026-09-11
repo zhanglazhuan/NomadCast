@@ -218,6 +218,21 @@ const Episode *podcast_model_get_episode_by_id(struct PodcastApp *app, int episo
     return find_episode_by_id(app->model, episode_id);
 }
 
+void podcast_model_update_episode_duration(struct PodcastApp *app, int episode_id, int duration_sec)
+{
+    PodcastModel *m = app->model;
+    if (!m || episode_id <= 0 || duration_sec <= 0) return;
+    for (int i = 0; i < m->current_channel_episode_count; i++)
+        if (m->current_channel_episodes[i].id == episode_id)
+            m->current_channel_episodes[i].duration_sec = duration_sec;
+    for (int i = 0; i < m->search_results.episode_count; i++)
+        if (m->search_results.episodes[i].id == episode_id)
+            m->search_results.episodes[i].duration_sec = duration_sec;
+    for (int i = 0; i < m->network_episode_count; i++)
+        if (m->network_episodes[i].id == episode_id)
+            m->network_episodes[i].duration_sec = duration_sec;
+}
+
 /* ── Local content ────────────────────────────────────────────────────── */
 
 const Channel **podcast_model_get_downloaded_channels_by_category(struct PodcastApp *app, channel_category_t cat, int *out)

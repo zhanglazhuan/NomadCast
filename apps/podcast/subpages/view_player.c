@@ -13,6 +13,7 @@
 #include "../controller.h"
 #include "../hal.h"
 #include "../cache.h"
+#include "../local_cache.h"
 #include "lv_bottom_sheet.h"
 #include "lv_num_input.h"
 #include "lv_page.h"
@@ -20,11 +21,14 @@
 
 extern PodcastApp g_podcast_app;
 
+static void fmt_time(int sec, char* buf, int sz);
+
 /* ── Player position polling ───────────────────────────────────────────── */
 
 typedef struct {
     lv_obj_t   *pbar;
     lv_obj_t   *time_label;
+    lv_obj_t   *total_label;    /* right-aligned "1:05" — refreshed once the real duration is known */
     lv_obj_t   *pp_label;       /* play/pause button glyph — synced to model state */
     int         duration;
     int         episode_id;
@@ -47,6 +51,27 @@ static void player_pos_timer_cb(lv_timer_t *timer) {
     if (!podcast_model_is_playing(&g_podcast_app)) return;
 
     int pos = hal_audio_get_position_sec();
+
+    /* The feed's itunes:duration can be wrong (e.g. a 1:05 teaser vs. the real
+     * hour-long episode).  Once the decoder has reported the true stream
+     * duration, adopt it so the bar/total label stop ending early while audio
+     * keeps playing. */
+    int real_dur = hal_audio_get_duration_sec();
+    if (real_dur > 0 && real_dur != ctx->duration) {
+        ctx->duration = real_dur;
+        if (lv_obj_is_valid(ctx->pbar))
+            lv_bar_set_range(ctx->pbar, 0, real_dur > 0 ? real_dur : 1);
+        if (lv_obj_is_valid(ctx->total_label)) {
+            char db[16]; fmt_time(real_dur, db, sizeof(db));
+            lv_label_set_text(ctx->total_label, db);
+        }
+        /* Option 1: write the real duration back so the episode lists stop
+         * showing the wrong feed itunes:duration.  Update both the transient
+         * network stores and (for a downloaded episode) the persisted bucket. */
+        podcast_model_update_episode_duration(&g_podcast_app, ctx->episode_id, real_dur);
+        cache_local_update_duration(&g_podcast_app, ctx->episode_id, real_dur);
+    }
+
     if (pos > ctx->duration && ctx->duration > 0) pos = ctx->duration;
 
     if (lv_obj_is_valid(ctx->pbar))
@@ -310,13 +335,15 @@ static void on_playlist(lv_event_t* e) {
         lv_obj_set_style_text_font(title, g_cjk_font, 0);
         lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
 
-        /* 时长 */
-        char ds[16]; playlist_fmt_time(t->duration_sec, ds, sizeof(ds));
-        lv_obj_t* d = lv_label_create(row);
-        lv_label_set_text(d, ds);
-        lv_obj_align(d, LV_ALIGN_RIGHT_MID, -8, 0);
-        lv_obj_set_style_text_color(d, lv_color_hex(0x999999), 0);
-        lv_obj_set_style_text_font(d, g_cjk_font, 0);
+        /* 时长 — 未知（duration_sec<=0）时不显示，避免 0:00 误导 */
+        if (t->duration_sec > 0) {
+            char ds[16]; playlist_fmt_time(t->duration_sec, ds, sizeof(ds));
+            lv_obj_t* d = lv_label_create(row);
+            lv_label_set_text(d, ds);
+            lv_obj_align(d, LV_ALIGN_RIGHT_MID, -8, 0);
+            lv_obj_set_style_text_color(d, lv_color_hex(0x999999), 0);
+            lv_obj_set_style_text_font(d, g_cjk_font, 0);
+        }
 
         /* 底部分隔线 */
         lv_obj_t* line = lv_obj_create(row);
@@ -492,6 +519,18 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     const char* tartist = ch ? ch->artist : "";
     int duration = ep ? ep->duration_sec : 0;
 
+    /* For a downloaded (local) file the feed duration can be wrong; trust the
+     * real M4A length so the progress bar and time labels match the audio. */
+    char media[2560];
+    podcast_controller_media_for_episode(app, eid, media, sizeof(media));
+    if (strncmp(media, "/sdcard/", 8) == 0) {
+        int real = cache_local_file_duration(media);
+        printf("[DBG] player: feed_dur=%d media=%s real=%d\n",
+               duration, media, real);
+        fflush(stdout);
+        if (real > 0) duration = real;
+    }
+
     Page page = lv_page_create(NULL, from_channel, page_navigator_navigate_back, &app->view->page_nav);
     int container_h = lv_display_get_vertical_resolution(lv_display_get_default())
                       - LV_STATUS_BAR_HEIGHT - LV_PAGE_HEADER_HEIGHT - TAB_BAR_HEIGHT;
@@ -502,6 +541,7 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_flex_flow(main, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(main, 0, 0);
+    lv_obj_set_style_pad_bottom(main, 16, 0);   /* 内容整体上移，避免底部按钮与 4-tab 栏重叠 */
     lv_obj_set_scrollbar_mode(main, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(main, LV_DIR_NONE);
 
@@ -517,11 +557,45 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_style_text_color(ci, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(ci, g_cjk_font, 0);
 
-    // 歌名
-    lv_obj_t* tn = lv_label_create(main);
-    lv_label_set_text(tn, tname);
-    lv_obj_set_style_text_font(tn, g_cjk_font, 0);
-    lv_obj_set_style_pad_top(tn, 8, 0);
+    // 歌名 — 固定宽度（与进度条等宽），超长横向循环滚动（同任务下载标题）
+    {
+        lv_point_t tsz;
+        lv_text_get_size(&tsz, tname, g_cjk_font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        int32_t screen_w = lv_display_get_horizontal_resolution(lv_display_get_default());
+        int32_t title_w  = screen_w * 85 / 100;   /* = LV_PCT(85)，与进度条等宽 */
+
+        lv_obj_t* tn_box = lv_obj_create(main);
+        lv_obj_set_size(tn_box, LV_PCT(85), tsz.y > 0 ? tsz.y : 24);
+        lv_obj_set_style_pad_all(tn_box, 0, 0);
+        lv_obj_set_style_border_width(tn_box, 0, 0);
+        lv_obj_set_style_bg_opa(tn_box, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_margin_top(tn_box, 8, 0);
+        lv_obj_clear_flag(tn_box, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(tn_box, LV_OBJ_FLAG_OVERFLOW_VISIBLE);   /* 裁剪超出的标题文本 */
+
+        lv_obj_t* tn = lv_label_create(tn_box);
+        lv_label_set_text(tn, tname);
+        lv_obj_set_style_text_font(tn, g_cjk_font, 0);
+
+        /* 标题过长 → 横向滚动到尾部展示完整标题，停 2s 后回到起点循环 */
+        if (tsz.x > title_w) {
+            lv_obj_align(tn, LV_ALIGN_LEFT_MID, 0, 0);
+            int32_t scroll_end = title_w - tsz.x;       /* 负值：向左滚动 */
+            uint32_t dur = (uint32_t)(-scroll_end) * 12; /* ~12 ms/px */
+            if (dur < 800) dur = 800;
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, tn);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x);
+            lv_anim_set_values(&a, 0, scroll_end);
+            lv_anim_set_duration(&a, dur);
+            lv_anim_set_repeat_delay(&a, 2000);
+            lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+            lv_anim_start(&a);
+        } else {
+            lv_obj_align(tn, LV_ALIGN_CENTER, 0, 0);
+        }
+    }
 
     // 歌手
     lv_obj_t* ta = lv_label_create(main);
@@ -569,6 +643,7 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     lv_label_set_text(dt, dbuf);
     lv_obj_align(dt, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_text_font(dt, g_cjk_font, 0);
+    pctx->total_label = dt;
 
     /* Position poll timer — 500ms */
     pctx->pos_timer = lv_timer_create(player_pos_timer_cb, 500, pctx);
