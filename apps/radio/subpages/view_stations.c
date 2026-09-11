@@ -12,7 +12,29 @@
 extern RadioApp g_radio_app;
 extern const lv_font_t *g_cjk_font;
 
+static lv_point_t s_press_pt = { 0, 0 };   /* touch-down point, for slide-vs-tap detection */
+
+static void on_station_pressed(lv_event_t *e) {
+    lv_indev_t *indev = lv_indev_active();
+    if (indev) lv_indev_get_point(indev, &s_press_pt);
+}
+
 static void on_station_clicked(lv_event_t *e) {
+    /* A swipe must not fire the tap handler. gesture_dir catches a flick (incl.
+     * at the scroll edge, where no scroll starts); press_moved catches fast
+     * pointer movement; the press→release distance catches a slow drag that
+     * LVGL reports as neither. */
+    lv_indev_t *indev = lv_indev_active();
+    if (indev) {
+        if (lv_indev_get_gesture_dir(indev) != LV_DIR_NONE ||
+            lv_indev_get_press_moved(indev))
+            return;
+        lv_point_t pt;
+        lv_indev_get_point(indev, &pt);
+        if (LV_ABS(pt.x - s_press_pt.x) + LV_ABS(pt.y - s_press_pt.y) > 20)
+            return;
+    }
+
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     radio_controller_play(&g_radio_app, idx);
     radio_nav_push(&g_radio_app, PAGE_STATIONS, PAGE_PLAYING);
@@ -116,7 +138,8 @@ static lv_obj_t *build_stations_page(struct RadioApp *app, void *user_data) {
         lv_obj_clear_flag(line, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
 
-        lv_obj_add_event_cb(row, on_station_clicked, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+        lv_obj_add_event_cb(row, on_station_pressed, LV_EVENT_PRESSED, NULL);
+        lv_obj_add_event_cb(row, on_station_clicked, LV_EVENT_SHORT_CLICKED, (void*)(intptr_t)i);
     }
 
     return page.screen;
