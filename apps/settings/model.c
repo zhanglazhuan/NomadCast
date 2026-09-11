@@ -45,6 +45,7 @@ void settings_model_init(struct SettingsApp* app) {
     app->model->time_format_24h = flash_get_bool("settings", "fmt24", true);
     app->model->sleep_timeout_min = flash_get_i32("settings", "sleep", 5);
     app->model->auto_power_off_min = flash_get_i32("settings", "auto_power_off", 15);
+    app->model->icon_size_idx = flash_get_i32("settings", "icon_size", 0);
     app->model->wifi_enabled = flash_get_bool("settings", "wifi", true);
     /* Restore WiFi state from hardware (survives app exit/re-enter) */
     app->model->connected_ssid[0] = '\0';
@@ -152,6 +153,16 @@ void settings_model_set_auto_power_off(struct SettingsApp* app, int minutes) {
     flash_set_i32("settings", "auto_power_off", minutes);
     sleep_monitor_set_auto_power_off_timeout(minutes);
     ESP_LOGI(TAG, "auto power-off set to %d min", minutes);
+}
+
+int settings_model_get_icon_size(struct SettingsApp* app) {
+    return app->model ? app->model->icon_size_idx : 0;
+}
+void settings_model_set_icon_size(struct SettingsApp* app, int idx) {
+    if (!app->model) return;
+    app->model->icon_size_idx = idx;
+    flash_set_i32("settings", "icon_size", idx);
+    ESP_LOGI(TAG, "icon size set to %d", idx);
 }
 
 /* ── WIFI ──────────────────────────────────────────────────────────────────── */

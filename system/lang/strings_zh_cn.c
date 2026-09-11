@@ -213,4 +213,8 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "空文件夹",
     "播放失败",
     "SD卡中没有能播放的音频",
+
+    /* Settings — General (icon size) */
+    "图标大小",
+    "中等\n大",
 };

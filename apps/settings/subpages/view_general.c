@@ -36,6 +36,14 @@ static void on_time_format_switch(lv_event_t* e) {
     settings_model_set_time_format_24h(&g_settings_app, fmt24);
 }
 
+/* ── 图标大小变更回调 ────────────────────────────────────────────────────── */
+
+static void on_icon_size_changed(lv_event_t* e) {
+    lv_obj_t* dd = lv_event_get_target(e);
+    int sel = lv_dropdown_get_selected(dd);
+    settings_model_set_icon_size(&g_settings_app, sel);
+}
+
 /* ── 时区变更回调 ──────────────────────────────────────────────────────────── */
 
 static void on_timezone_changed(lv_event_t* e) {
@@ -258,6 +266,16 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_height(sw_fmt, 24);
     if (fmt24) lv_obj_add_state(sw_fmt, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw_fmt, on_time_format_switch, LV_EVENT_VALUE_CHANGED, NULL);
+
+    /* ── 图标大小 ── */
+    int cur_icon_size = settings_model_get_icon_size(app);
+    lv_obj_t* row_icon = create_setting_row(cont, tr(STR_ICON_SIZE));
+    lv_obj_t* dd_icon = lv_dropdown_create(row_icon);
+    lv_dropdown_set_options(dd_icon, tr(STR_ICON_SIZE_OPTIONS));
+    lv_dropdown_set_selected(dd_icon, cur_icon_size);
+    lv_obj_set_width(dd_icon, LV_PCT(100));
+    dropdown_set_cjk(dd_icon);
+    lv_obj_add_event_cb(dd_icon, on_icon_size_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 睡眠超时 ── */
     int cur_timeout = settings_model_get_sleep_timeout(app);

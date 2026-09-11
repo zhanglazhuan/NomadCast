@@ -222,5 +222,9 @@ enum {
     STR_PLAYER_FAILED_TO_PLAY,
     STR_PLAYER_NO_AUDIO,
 
+    /* Settings — General (icon size) */
+    STR_ICON_SIZE,
+    STR_ICON_SIZE_OPTIONS,
+
     STR_COUNT
 };

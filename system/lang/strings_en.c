@@ -213,4 +213,8 @@ const char *const strings_en[STR_COUNT] = {
     "Empty folder",
     "Failed to play",
     "No playable audio on SD card",
+
+    /* Settings — General (icon size) */
+    "Icon Size",
+    "Medium\nLarge",
 };
