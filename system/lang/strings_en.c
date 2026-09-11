@@ -206,4 +206,11 @@ const char *const strings_en[STR_COUNT] = {
 
     /* Podcast — player (action button) */
     "Play",
+
+    /* Player — app / files / playback */
+    "Player",
+    "Files",
+    "Empty folder",
+    "Failed to play",
+    "No playable audio on SD card",
 };

@@ -206,4 +206,11 @@ const char *const strings_zh_cn[STR_COUNT] = {
 
     /* Podcast — player (action button) */
     "播放",
+
+    /* Player — app / files / playback */
+    "播放器",
+    "文件",
+    "空文件夹",
+    "播放失败",
+    "SD卡中没有能播放的音频",
 };

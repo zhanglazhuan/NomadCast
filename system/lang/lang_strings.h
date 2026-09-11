@@ -215,5 +215,12 @@ enum {
     /* Podcast — player (action button) */
     STR_PLAY,
 
+    /* Player — app / files / playback */
+    STR_APP_PLAYER,
+    STR_TAB_FILES,
+    STR_PLAYER_EMPTY_DIR,
+    STR_PLAYER_FAILED_TO_PLAY,
+    STR_PLAYER_NO_AUDIO,
+
     STR_COUNT
 };

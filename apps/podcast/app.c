@@ -21,7 +21,7 @@ PodcastApp g_podcast_app;
 static const char *TAG = "podcast_app";
 
 /* Icon */
-extern const lv_image_dsc_t ic_podcasts_40x40;
+extern const lv_image_dsc_t ic_podcasts_60x60;
 
 /* ── Startup: splash → init → navigate to network ────────────────────── */
 /* (follows pc_demo/podcast/app.c podcast_app_startup pattern) */
@@ -134,7 +134,7 @@ bool podcast_app_factory_reset(void)
 
 static application_t podcast_app_desc = {
     .name       = (char *)"Podcast",
-    .icon       = &ic_podcasts_40x40,
+    .icon       = &ic_podcasts_60x60,
     .start_func = podcast_app_start,
     .stop_func  = podcast_app_stop,
     .back_func  = podcast_app_back,

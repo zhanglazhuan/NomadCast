@@ -13,6 +13,7 @@
 #include "lv_page.h"
 #include "launcher.h"
 #include "lang.h"
+#include <string.h>
 
 extern const lv_font_t *g_cjk_font;
 
@@ -31,11 +32,22 @@ static void app_launcher_event_cb(lv_event_t *e)
     lv_obj_t *app_btn = lv_event_get_target(e);
     lv_obj_t *icon_cont = lv_obj_get_child(app_btn, 0);
     if (icon_cont) {
+        lv_obj_set_style_border_color(icon_cont, lv_color_white(), LV_PART_MAIN);
         lv_obj_set_style_border_width(icon_cont, 3, LV_PART_MAIN);
     }
 
     ESP_LOGI(TAG, "Launching: %s", app->name);
     launcher_open_app(app->name);
+}
+
+/* ---- App brand color (Android-style launcher tile) ---- */
+
+static lv_color_t app_icon_color(const char *name)
+{
+    if (name && strcmp(name, "Podcast") == 0)  return lv_color_hex(0x7C4DFF);
+    if (name && strcmp(name, "Player") == 0)   return lv_color_hex(0xFF7043);
+    if (name && strcmp(name, "Settings") == 0) return lv_color_hex(0x607D8B);
+    return lv_color_hex(0x9E9E9E);   /* new apps default to neutral grey */
 }
 
 /* ---- Grid layout ---- */
@@ -49,7 +61,7 @@ static void create_grid_container(lv_obj_t *container,
     lv_coord_t pad_all     = 10;
     lv_coord_t pad_column  = 20;
     lv_coord_t pad_row     = 20;
-    lv_coord_t gap         = 8;
+    lv_coord_t gap         = 4;
 
     lv_coord_t avail = screen_w - (pad_all * 2) - (pad_column * 2) - 15; /* 15 = scrollbar reserve */
     lv_coord_t cell_w = avail / 2;
@@ -94,13 +106,17 @@ static lv_obj_t *create_app_grid_button(lv_obj_t *container, application_t *app,
 
     lv_obj_add_event_cb(btn, app_launcher_event_cb, LV_EVENT_CLICKED, app);
 
-    /* Icon container (square, bordered) */
+    /* Icon tile — Android-style rounded square with the app brand color and a
+     * subtle vertical gradient; the glyph is drawn white on top. */
     lv_obj_t *icon_cont = lv_obj_create(btn);
     lv_obj_set_size(icon_cont, 80, 80);
-    lv_obj_set_style_bg_opa(icon_cont, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(icon_cont, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(icon_cont, lv_color_black(), LV_PART_MAIN);
-    lv_obj_set_style_radius(icon_cont, 6, LV_PART_MAIN);
+    lv_color_t brand = app_icon_color(app->name);
+    lv_obj_set_style_bg_color(icon_cont, brand, LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_color(icon_cont, lv_color_darken(brand, 40), LV_PART_MAIN);
+    lv_obj_set_style_bg_grad_dir(icon_cont, LV_GRAD_DIR_VER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(icon_cont, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(icon_cont, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(icon_cont, 20, LV_PART_MAIN);
     lv_obj_set_style_pad_all(icon_cont, 0, LV_PART_MAIN);
     lv_obj_clear_flag(icon_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(icon_cont, LV_OBJ_FLAG_CLICKABLE);
@@ -109,12 +125,16 @@ static lv_obj_t *create_app_grid_button(lv_obj_t *container, application_t *app,
     if (app->icon) {
         lv_obj_t *img = lv_img_create(icon_cont);
         lv_img_set_src(img, app->icon);
+        /* Recolor the black glyph white (alpha preserved) so it reads as an
+         * Android launcher foreground on the colored tile. */
+        lv_obj_set_style_image_recolor(img, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_image_recolor_opa(img, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_center(img);
     } else {
         lv_obj_t *fb = lv_label_create(icon_cont);
         lv_label_set_text(fb, LV_SYMBOL_DUMMY);
         lv_obj_set_style_text_font(fb, &lv_font_montserrat_16, LV_PART_MAIN);
-        lv_obj_set_style_text_color(fb, lv_color_black(), LV_PART_MAIN);
+        lv_obj_set_style_text_color(fb, lv_color_white(), LV_PART_MAIN);
         lv_obj_center(fb);
     }
 

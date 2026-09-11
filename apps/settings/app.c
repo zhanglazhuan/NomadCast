@@ -13,7 +13,7 @@
 SettingsApp g_settings_app;
 
 /* Icon */
-extern const lv_image_dsc_t ic_settings_40x40;
+extern const lv_image_dsc_t ic_settings_60x60;
 
 /* ---- Wrappers for app_manager ---- */
 
@@ -57,7 +57,7 @@ bool settings_app_factory_reset(void)
 
 static application_t settings_app_desc = {
     .name       = (char *)"Settings",
-    .icon       = &ic_settings_40x40,
+    .icon       = &ic_settings_60x60,
     .start_func = settings_app_start,
     .stop_func  = settings_app_stop,
     .back_func  = settings_app_back,
