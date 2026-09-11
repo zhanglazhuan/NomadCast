@@ -44,6 +44,11 @@ void radio_controller_init(struct RadioApp* app) {
 }
 
 void radio_controller_deinit(struct RadioApp* app) {
+    /* Stop any live stream and free the whole ADF pipeline before the app is
+     * torn down, so exiting to the launcher kills playback instead of leaving
+     * the radio playing in the background. */
+    if (audio_player_is_active()) audio_player_stop();
+
     if (app->controller) {
         input_unsubscribe(on_radio_input);
         free(app->controller);
