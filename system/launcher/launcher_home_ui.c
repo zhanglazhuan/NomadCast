@@ -48,6 +48,7 @@ static lv_color_t app_icon_color(const char *name)
     if (name && strcmp(name, "Podcast") == 0)  return lv_color_hex(0x7C4DFF);
     if (name && strcmp(name, "Radio") == 0)    return lv_color_hex(0x1E88E5);
     if (name && strcmp(name, "Player") == 0)   return lv_color_hex(0xFF7043);
+    if (name && strcmp(name, "Alarm") == 0)    return lv_color_hex(0xFB8C00);
     if (name && strcmp(name, "Settings") == 0) return lv_color_hex(0x607D8B);
     return lv_color_hex(0x9E9E9E);   /* new apps default to neutral grey */
 }

@@ -75,6 +75,14 @@ void sleep_monitor_notify_activity(void);
 bool sleep_monitor_is_sleeping(void);
 
 /**
+ * @brief Wake the device from screen-off sleep (no-op if already awake).
+ *
+ * Public wrapper for the alarm service so an alarm can light the screen and
+ * re-enable touch without going through the power key.
+ */
+void sleep_monitor_wake(void);
+
+/**
  * @brief Auto power-off: after `min` minutes of idle inactivity, and only if
  *        the power-off check says it's safe, invoke the power-off action.
  *        Independent of the screen-off sleep state (a sleeping device still

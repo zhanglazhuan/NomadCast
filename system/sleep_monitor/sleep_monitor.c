@@ -222,6 +222,11 @@ bool sleep_monitor_is_sleeping(void)
     return s_sleep.is_sleeping;
 }
 
+void sleep_monitor_wake(void)
+{
+    wake_from_sleep();
+}
+
 void sleep_monitor_set_power_pin(gpio_num_t pin)
 {
     s_sleep.power_pin = pin;

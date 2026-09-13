@@ -12,6 +12,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/launcher
     ${CMAKE_CURRENT_SOURCE_DIR}/system/input
     ${CMAKE_CURRENT_SOURCE_DIR}/system/sleep_monitor
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/alarm_service
     ${CMAKE_CURRENT_SOURCE_DIR}/system/flash_store
     ${CMAKE_CURRENT_SOURCE_DIR}/system/clock
     ${CMAKE_CURRENT_SOURCE_DIR}/system/lang
@@ -26,6 +27,7 @@ set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/podcast
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/radio
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/player
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/alarm
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/esp-adf/components
 )
 

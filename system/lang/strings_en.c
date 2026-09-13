@@ -224,4 +224,20 @@ const char *const strings_en[STR_COUNT] = {
     "LIVE",
     "Failed to play",
     "No stations",
+
+    /* Alarm — app / list / edit / ringing */
+    "Alarm",
+    "No alarms",
+    "Add alarm",
+    "Edit alarm",
+    "Save",
+    "Delete",
+    "Alarm",
+    "Dismiss",
+    "Snooze",
+    "Repeat",
+    "Once",
+    "Daily",
+    "Weekdays",
+    "Will ring again in 5 minutes",
 };

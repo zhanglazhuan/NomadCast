@@ -35,6 +35,7 @@ extern "C" {
 #include "input.h"      /* input_init, input_event_t */
 #include "app_event.h"  /* app_event_fire, APP_EVENT_KEY_PLAY_PAUSE */
 #include "sleep_monitor.h"
+#include "alarm_service.h"
 #include "flash_store.h"
 #include "clock.h"
 #include "lang.h"
@@ -56,6 +57,7 @@ void settings_app_register(void);
 	void podcast_app_register(void);
 	void radio_app_register(void);
 	void player_app_register(void);
+	void alarm_app_register(void);
 	void controller_process_rss(void);
 	void controller_process_download(void);
 }
@@ -257,6 +259,9 @@ static void power_off(void)
      * configured AFTER the wake source above. */
     rtc_gpio_pulldown_en(NOMADCAST_PIN_KEY_POWER);
     rtc_gpio_pullup_dis(NOMADCAST_PIN_KEY_POWER);
+
+    /* Arm an RTC timer so an upcoming alarm wakes the device out of deep sleep. */
+    alarm_service_prepare_sleep();
 
     ESP_LOGI(TAG, "Entering deep sleep now...");
     esp_deep_sleep_start();
@@ -472,6 +477,7 @@ static void system_services_init(const app_context_t *app)
     flash_store_init();
     lang_init();
     clock_init();
+    alarm_service_init();
     battery_init();
 
     /* Auto power-off: default 15 min idle, persisted by Settings → General.
@@ -583,6 +589,7 @@ static void launcher_start(app_context_t *app)
     podcast_app_register();
     radio_app_register();
     player_app_register();
+    alarm_app_register();
     settings_app_register();
 
     if (app->boot_splash) {
@@ -695,6 +702,7 @@ static void main_event_loop(void)
         app_event_process();
         controller_process_download();
         audio_player_process();
+        alarm_service_process();
 
         uint32_t delay = lv_timer_handler();
         vTaskDelay(delay > 0 ? pdMS_TO_TICKS(delay) : 1);
