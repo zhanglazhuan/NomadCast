@@ -35,6 +35,9 @@ set(EXTRA_COMPONENT_DIRS
 # Board configs live in boards/<target>/ — currently esp32s3
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/boards/esp32s3)
 
+# Central backend server config (NOMADCAST_SERVER_BASE) — one place to edit
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/config)
+
 # Exclude conflicting ADF components (vendor/esp-adf)
 set(EXCLUDE_COMPONENTS audio_board audio_hal display_service esp_peripherals audio_sal)
 

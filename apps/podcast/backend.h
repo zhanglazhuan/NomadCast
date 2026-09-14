@@ -11,10 +11,11 @@
 extern "C" {
 #endif
 
-/* Podcast proxy server — change this to the production cloud IP.
+/* Podcast proxy server — set the host in config/server_config.h.
  * (Guard allows the PC simulator to override it via -DPODCAST_SERVER=...) */
+#include "server_config.h"
 #ifndef PODCAST_SERVER
-#define PODCAST_SERVER  "http://192.168.1.88:5088"
+#define PODCAST_SERVER  NOMADCAST_SERVER_BASE
 #endif
 
 #define BK_MAX_TITLE    256

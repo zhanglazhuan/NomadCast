@@ -10,6 +10,7 @@
 #include "log_uploader.h"
 #include "log_system.h"
 #include "app_event.h"
+#include "server_config.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
@@ -28,8 +29,7 @@
 static const char *TAG = "log_upload";
 
 #define LOG_BASE_PATH       "/sdcard/.nomadcast/logs"
-#define PODCAST_SERVER      "http://192.168.1.88:5088"
-#define UPLOAD_URL          PODCAST_SERVER "/api/logs/chunk"
+#define UPLOAD_URL          NOMADCAST_SERVER_BASE "/api/logs/chunk"
 #define UPLOAD_CHUNK_BYTES  4096
 #define MAX_RETRIES         3
 /* Payload buffers live in PSRAM and the uploader has no large stack objects;

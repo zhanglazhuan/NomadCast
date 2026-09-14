@@ -12,8 +12,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "server_config.h"
+
 /* Default manifest URL when no "upd_url" flash key is configured. */
-#define OTA_DEFAULT_MANIFEST_URL "http://192.168.1.88:5088/api/ota/check"
+#define OTA_DEFAULT_MANIFEST_URL NOMADCAST_SERVER_BASE "/api/ota/check"
 
 #ifdef __cplusplus
 extern "C" {
