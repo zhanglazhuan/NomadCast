@@ -175,7 +175,7 @@ void clock_sync_sntp(void)
 {
     ESP_LOGI(TAG, "Starting SNTP sync...");
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(0, "ntp.aliyun.com");   /* Aliyun NTP — reachable in China */
     sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
     sntp_set_time_sync_notification_cb(on_sntp_sync);
     esp_sntp_init();

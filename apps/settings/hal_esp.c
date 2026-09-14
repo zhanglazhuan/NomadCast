@@ -84,6 +84,25 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         esp_wifi_get_ps(&ps);
         ESP_LOGI(TAG, "PS mode after connect: %d (0=NONE,1=MIN_MODEM,2=MAX_MODEM)",
                  (int)ps);
+
+        /* ── DNS fallback ─────────────────────────────────────────────────────
+         * Some routers (and China ISPs) hand out a broken or empty DNS. Always
+         * install AliDNS 223.5.5.5 as backup so hostnames still resolve when the
+         * DHCP-provided resolver fails; if DHCP gave none at all, promote it to
+         * primary. */
+        if (s_sta_netif) {
+            esp_netif_dns_info_t dns_main;
+            bool has_main = (esp_netif_get_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN,
+                                                    &dns_main) == ESP_OK &&
+                             dns_main.ip.type == ESP_IPADDR_TYPE_V4 &&
+                             dns_main.ip.u_addr.ip4.addr != 0);
+            esp_netif_dns_info_t dns = { .ip = ESP_IP4ADDR_INIT(223, 5, 5, 5) };
+            esp_netif_set_dns_info(s_sta_netif,
+                                   has_main ? ESP_NETIF_DNS_BACKUP : ESP_NETIF_DNS_MAIN,
+                                   &dns);
+            ESP_LOGI(TAG, "DNS: set 223.5.5.5 as %s", has_main ? "backup" : "primary");
+        }
+
         s_disconnect_reason = 0;
         app_event_fire(APP_EVENT_WIFI_CONNECTED, NULL);
         xEventGroupSetBits(s_wifi_evt, WIFI_CONNECTED_BIT);

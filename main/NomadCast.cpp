@@ -58,6 +58,7 @@ void settings_app_register(void);
 	void radio_app_register(void);
 	void player_app_register(void);
 	void alarm_app_register(void);
+	void weather_app_register(void);
 	void controller_process_rss(void);
 	void controller_process_download(void);
 }
@@ -589,6 +590,7 @@ static void launcher_start(app_context_t *app)
     podcast_app_register();
     radio_app_register();
     player_app_register();
+    weather_app_register();
     alarm_app_register();
     settings_app_register();
 

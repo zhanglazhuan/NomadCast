@@ -76,6 +76,9 @@ static void on_app_event(app_event_t event, const void *data)
     case APP_EVENT_KEY_VOL_DOWN:
         /* Physical keys — status bar has no reaction. */
         break;
+    case APP_EVENT_WEATHER_UPDATED:
+        /* Weather refresh — status bar has no reaction. */
+        break;
     }
 }
 

@@ -59,6 +59,9 @@ const char *app_name_tr(const char *app_key) {
     if (strcmp(app_key, "Alarm") == 0) {
         return tr(STR_APP_ALARM);
     }
+    if (strcmp(app_key, "Weather") == 0) {
+        return tr(STR_APP_WEATHER);
+    }
     if (strcmp(app_key, "Settings") == 0) {
         return tr(STR_APP_SETTINGS);
     }
