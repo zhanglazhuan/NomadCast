@@ -27,6 +27,7 @@ idf_component_register(
         "imgs/24x24/ic_podcasts.c"
         "imgs/24x24/ic_settings.c"
         "fonts/font_harmony.c"
+        "pinyin_zh_cn.c"
         "imgs/40x40/ic_settings_40x40.c"
         "imgs/40x40/ic_podcasts_40x40.c"
         "imgs/60x60/ic_settings_60x60.c"
@@ -37,6 +38,6 @@ idf_component_register(
         "imgs/60x60/ic_weather_60x60.c"
         "imgs/16x16/ic_schedule_16x16.c"
         "imgs/16x16/ic_stacks_16x16.c"
-    INCLUDE_DIRS "framework" "widgets" "imgs/24x24" "imgs/40x40" "imgs/60x60" "imgs/16x16"
+    INCLUDE_DIRS "." "framework" "widgets" "imgs/24x24" "imgs/40x40" "imgs/60x60" "imgs/16x16"
     REQUIRES lvgl clock events logs
 )

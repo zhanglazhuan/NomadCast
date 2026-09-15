@@ -77,6 +77,8 @@ static void render_forecast_row(lv_obj_t *parent, const char *day, const char *w
     lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(row, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(row, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *dl = make_label(row, day, g_cjk_font, 0x333333);
     lv_obj_set_width(dl, 88);
@@ -131,6 +133,8 @@ static lv_obj_t *build_current_page(struct WeatherApp *app, void *user_data) {
     lv_obj_set_style_bg_color(card, lv_color_hex(0xE3F2FD), 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(card, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(card, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t *trow = lv_obj_create(card);
     lv_obj_set_size(trow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -143,16 +147,20 @@ static lv_obj_t *build_current_page(struct WeatherApp *app, void *user_data) {
     char tbuf[16];
     snprintf(tbuf, sizeof(tbuf), "%.0f", m->temp);
     make_label(trow, tbuf, &lv_font_montserrat_20, 0x1565C0);
-    make_label(trow, "°C", g_cjk_font, 0x1565C0);
+    make_label(trow, "°C", &lv_font_montserrat_20, 0x1565C0);
 
     make_label(card, m->text, g_cjk_font, 0x333333);
 
     char info[160];
-    snprintf(info, sizeof(info), "%s %.0f° · %s %.0f%% · %s %.0f km/h",
+    snprintf(info, sizeof(info), "%s %.0f %s %.0f%% %s %.0f km/h",
              tr(STR_WEATHER_FEELS_LIKE), m->feels_like,
              tr(STR_WEATHER_HUMIDITY), m->humidity,
              tr(STR_WEATHER_WIND), m->wind);
-    make_label(card, info, g_cjk_font, 0x555555);
+    lv_obj_t *info_l = make_label(card, info, g_cjk_font, 0x555555);
+    lv_obj_set_width(info_l, LV_PCT(100));
+    lv_label_set_long_mode(info_l, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(info_l, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_scrollbar_mode(info_l, LV_SCROLLBAR_MODE_OFF);
 
     if (m->updated[0]) {
         char upd[64];
@@ -166,7 +174,7 @@ static lv_obj_t *build_current_page(struct WeatherApp *app, void *user_data) {
     for (int i = 0; i < WEATHER_DAYS; i++) {
         char day[32], range[32];
         format_day(day, sizeof(day), m->daily_date[i]);
-        snprintf(range, sizeof(range), "%.0f° / %.0f°", m->tmax[i], m->tmin[i]);
+        snprintf(range, sizeof(range), "%.0f / %.0f", m->tmax[i], m->tmin[i]);
         render_forecast_row(cont, day, m->daily_text[i], range);
     }
 

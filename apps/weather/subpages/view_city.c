@@ -8,6 +8,7 @@
 #include "../controller.h"
 #include "lv_page.h"
 #include "lang.h"
+#include "pinyin_zh_cn.h"
 
 extern WeatherApp g_weather_app;
 extern const lv_font_t *g_cjk_font;
@@ -181,7 +182,7 @@ static lv_obj_t *build_city_page(struct WeatherApp *app, void *user_data) {
     if (m && m->use_ip) lv_obj_add_state(sw, LV_STATE_CHECKED);
     lv_obj_add_event_cb(sw, on_auto_switch, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* ── search bar ── */
+    /* ── search bar (自动定位开关正下方,键盘/候选栏在其下方,不遮挡) ── */
     lv_obj_t *search_bar = lv_obj_create(cont);
     lv_obj_set_size(search_bar, LV_PCT(100), 44);
     lv_obj_set_style_border_width(search_bar, 0, 0);
@@ -247,12 +248,16 @@ static lv_obj_t *build_city_page(struct WeatherApp *app, void *user_data) {
     lv_obj_t *kb = lv_keyboard_create(page.screen);
     lv_obj_add_flag(kb, LV_OBJ_FLAG_FLOATING);
     lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
+    /* 默认键盘高度=屏高50%(160px),候选栏浮在其上会盖到搜索框;
+     * 压到 140px 让「键盘+候选栏」整体落在搜索框下方,不遮挡输入框。 */
+    lv_obj_set_height(kb, 140);
     lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_pad_all(kb, 0, 0);
 
     lv_obj_t *ime = lv_ime_pinyin_create(page.screen);
     if (g_cjk_font) lv_obj_set_style_text_font(ime, g_cjk_font, 0);
     lv_ime_pinyin_set_keyboard(ime, kb);
+    lv_ime_pinyin_set_dict(ime, (lv_pinyin_dict_t *)g_pinyin_zh_cn_dict);   /* 简体优先 */
     lv_keyboard_set_textarea(kb, ta);
 
     lv_obj_t *cand = lv_ime_pinyin_get_cand_panel(ime);

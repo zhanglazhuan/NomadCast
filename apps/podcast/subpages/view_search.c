@@ -13,6 +13,7 @@
 #include "lv_page.h"
 #include "lv_toast.h"
 #include "lang.h"
+#include "pinyin_zh_cn.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -252,6 +253,7 @@ static lv_obj_t *build_search_page(struct PodcastApp *app, void *user_data) {
     lv_obj_t *ime = lv_ime_pinyin_create(page.screen);
     if (g_cjk_font) lv_obj_set_style_text_font(ime, g_cjk_font, 0);
     lv_ime_pinyin_set_keyboard(ime, kb);
+    lv_ime_pinyin_set_dict(ime, (lv_pinyin_dict_t *)g_pinyin_zh_cn_dict);   /* 简体优先 */
 
     lv_keyboard_set_textarea(kb, ta);
 
