@@ -232,6 +232,7 @@ static bool upload_chunk(const char *session_base, int start_offset, int *next_o
     esp_http_client_set_header(client, "Content-Type", "application/x-ndjson");
     esp_http_client_set_header(client, "X-Log-Session", session_base);
     esp_http_client_set_header(client, "X-Log-Offset", offset_header);
+    esp_http_client_set_header(client, "X-Api-Key", NOMADCAST_API_KEY);
 
     /* The explicit content length is required here. Passing 0 causes
      * esp_http_client to send an empty request body even when a post field

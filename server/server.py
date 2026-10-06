@@ -8,9 +8,12 @@
     # 服务运行在 http://0.0.0.0:5088
 """
 import os
+import hmac
+import time
 import datetime
 import json
 import threading
+from functools import wraps
 from pathlib import Path
 from flask import Flask, request, jsonify, send_file, Response
 from podcast_service.search import search_podcasts, search_episodes
@@ -38,6 +41,111 @@ FIRMWARE_DIR = Path(__file__).parent / "firmware"
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_UPLOAD_LOCK = threading.Lock()
 
+# Shared device API key — sent by the firmware as the `X-Api-Key` header.
+# Override via the NOMADCAST_API_KEY environment variable; keep it in sync with
+# NOMADCAST_API_KEY in config/server_config.h (change both for production).
+API_KEY = os.environ.get("NOMADCAST_API_KEY", "nomadcast-shared-key-2026")
+
+
+def _api_key_ok() -> bool:
+    provided = request.headers.get("X-Api-Key", "")
+    return bool(provided) and hmac.compare_digest(provided.encode(), API_KEY.encode())
+
+
+def _client_scheme() -> str:
+    """Client-facing scheme, honoring a TLS-terminating reverse proxy.
+
+    Behind nginx/Caddy the app itself sees http://, so read X-Forwarded-Proto
+    (a comma list in some setups) and fall back to the actual request scheme.
+    """
+    fwd = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()
+    return fwd if fwd in ("http", "https") else request.scheme
+
+
+def api_key_required(fn):
+    """Reject requests missing the shared X-Api-Key header with 401."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not _api_key_ok():
+            return jsonify({"error": "unauthorized"}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+# ─── Log retention ─────────────────────────────────────────────
+# Device session logs under LOG_DIR grow without bound unless pruned. A daemon
+# thread sweeps them on a timer:
+#   1. Age  — drop *.log / *.bad older than NOMADCAST_LOG_RETENTION_DAYS.
+#   2. Size — if the directory still exceeds NOMADCAST_LOG_MAX_BYTES, drop the
+#             oldest files until it fits.
+# Both knobs are env-tunable so the same code works in dev and on a real host.
+
+LOG_RETENTION_DAYS = int(os.environ.get("NOMADCAST_LOG_RETENTION_DAYS", "7"))
+LOG_MAX_TOTAL_BYTES = int(os.environ.get("NOMADCAST_LOG_MAX_BYTES", str(100 * 1024 * 1024)))
+LOG_PRUNE_INTERVAL_S = 600
+
+
+def prune_logs(now: float | None = None) -> int:
+    """Delete old / over-budget session logs. Returns number of files removed."""
+    if not LOG_DIR.exists():
+        return 0
+    cutoff = (now if now is not None else time.time()) - LOG_RETENTION_DAYS * 86400
+
+    files = []
+    for p in LOG_DIR.iterdir():
+        if not p.is_file() or p.suffix not in (".log", ".bad"):
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        files.append((st.st_mtime, st.st_size, p))
+
+    removed = 0
+    survivors = []
+    for mtime, size, p in files:
+        if mtime < cutoff:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                survivors.append((mtime, size, p))
+        else:
+            survivors.append((mtime, size, p))
+
+    total = sum(size for _, size, _ in survivors)
+    if total > LOG_MAX_TOTAL_BYTES:
+        survivors.sort(key=lambda f: f[0])  # oldest mtime first
+        for mtime, size, p in survivors:
+            if total <= LOG_MAX_TOTAL_BYTES:
+                break
+            try:
+                p.unlink()
+                total -= size
+                removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+def _log_pruner_loop():
+    time.sleep(30)  # delay the first sweep past import so startup stays clean
+    while True:
+        try:
+            n = prune_logs()
+            if n:
+                app.logger.info("[logs] pruned %d old session files", n)
+        except Exception:
+            app.logger.exception("[logs] prune failed")
+        time.sleep(LOG_PRUNE_INTERVAL_S)
+
+
+# Daemon thread, so a Ctrl-C or worker exit never blocks shutdown. Under a
+# multi-worker gunicorn setup each worker prunes independently — harmless,
+# since prune_logs() is idempotent (a lost unlink() race just logs a miss).
+_prune_thread = threading.Thread(target=_log_pruner_loop, name="log-pruner", daemon=True)
+_prune_thread.start()
+
 
 @app.route("/")
 def index():
@@ -45,6 +153,7 @@ def index():
     return jsonify({
         "service": "Leisound Podcast Aggregation",
         "version": "0.2.0",
+        "auth": "protected endpoints require the X-Api-Key header (see NOMADCAST_API_KEY)",
         "endpoints": {
             # 账号
             "POST /api/register": "注册 — body: {name, password, device_id} → {user_id}",
@@ -147,6 +256,7 @@ def api_episodes():
 
 
 @app.route("/api/download")
+@api_key_required
 def api_download():
     """
     下载单集音频。
@@ -173,6 +283,7 @@ def api_download():
 
 
 @app.route("/api/raw")
+@api_key_required
 def api_raw():
     """
     Simple byte-forwarding proxy — no transcoding, no buffering.
@@ -232,6 +343,7 @@ def api_raw():
 
 
 @app.route("/api/play")
+@api_key_required
 def api_play():
     """
     Proxy-play audio for the ESP32 ADF pipeline.
@@ -297,6 +409,7 @@ def api_play():
 
 
 @app.route("/api/download-batch")
+@api_key_required
 def api_download_batch():
     """
     解析 RSS 并批量下载前 N 集。
@@ -595,13 +708,18 @@ def api_login():
 
 # ─── 黑名单管理 ────────────────────────────────────────────
 
-@app.route("/api/blacklist")
+@app.route("/api/blacklist", methods=["GET", "DELETE"])
 def api_blacklist():
     """查看 / 管理频道黑名单。DELETE ?id=... 移出黑名单。"""
     if request.method == "DELETE":
+        if not _api_key_ok():
+            return jsonify({"error": "unauthorized"}), 401
         cid = request.args.get("id", "").strip()
         if cid:
-            blacklist_remove(int(cid))
+            try:
+                blacklist_remove(int(cid))
+            except (ValueError, TypeError):
+                pass
         return jsonify({"blacklist": blacklist_all()})
     return jsonify({"blacklist": blacklist_all()})
 
@@ -655,7 +773,7 @@ def api_ota_check():
 
         return jsonify({
             "version": version,
-            "url": f"http://{request.host}/api/ota/download",
+            "url": f"{_client_scheme()}://{request.host}/api/ota/download",
             "size": size,
             "changelog": changelog,
             "date": date,
@@ -688,6 +806,7 @@ def api_ota_download():
 # 设备仅上传原始字节；服务端负责校验、去重和归档。
 
 @app.route("/api/logs/chunk", methods=["POST"])
+@api_key_required
 def api_logs_chunk():
     """Append one idempotent NDJSON byte range from a device session."""
     session = request.headers.get("X-Log-Session", "").strip()
@@ -751,6 +870,7 @@ def api_logs_chunk():
                     "accepted_bytes": len(body)})
 
 @app.route("/api/logs/upload", methods=["POST"])
+@api_key_required
 def api_logs_upload():
     """接收端侧设备上传的系统日志并落盘。"""
     data = request.get_json(silent=True)

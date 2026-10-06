@@ -14,12 +14,26 @@
 #include "esp_timer.h"
 #include "hal.h"
 #include "lang.h"
+#include "server_config.h"
 
 static const char *TAG = "http_esp";
 
 static char g_http_last_error[128];
 
 const char *http_last_error(void) { return g_http_last_error; }
+
+/* Only attach the API key to requests that target our own aggregation server;
+ * direct CDN downloads must not leak the key to third parties. */
+static bool url_is_our_server(const char *url)
+{
+    return strncmp(url, NOMADCAST_SERVER_BASE, strlen(NOMADCAST_SERVER_BASE)) == 0;
+}
+
+static void http_set_api_key(esp_http_client_handle_t client, const char *url)
+{
+    if (url_is_our_server(url))
+        esp_http_client_set_header(client, "X-Api-Key", NOMADCAST_API_KEY);
+}
 
 /* Xiaoyuzhou's track URL embeds the final CDN path.  Some ESP-TLS/server
  * combinations expose a 302 response but not its Location header, so derive
@@ -57,6 +71,8 @@ char *http_get_sync_timeout(const char *url, int *out_status, int *out_len, int 
         if (out_len)    *out_len = 0;
         return NULL;
     }
+
+    http_set_api_key(client, url);
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -134,6 +150,8 @@ char *http_post_json_sync(const char *url, const char *json_body,
         if (out_len)    *out_len = 0;
         return NULL;
     }
+
+    http_set_api_key(client, url);
 
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -238,6 +256,7 @@ bool http_download_to_file(const char *url, const char *file_path,
         esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0");
         esp_http_client_set_header(client, "Accept", "audio/mp4,audio/*,*/*;q=0.8");
         esp_http_client_set_header(client, "Connection", "close");
+        http_set_api_key(client, current_url);
 
         struct stat existing_st;
         long resume_offset = (stat(file_path, &existing_st) == 0 &&
