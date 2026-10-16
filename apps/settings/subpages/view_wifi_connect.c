@@ -142,13 +142,13 @@ static void on_ta_ready(lv_event_t* e) {
 /* ── 构建页面 ──────────────────────────────────────────────────────────────── */
 
 static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_data) {
-    (void)user_data;
-
     ConnectCtx* ctx = malloc(sizeof(ConnectCtx));
     memset(ctx, 0, sizeof(ConnectCtx));
 
-    if (app->view->page_nav.nav_ctx) {
-        strncpy(ctx->ssid, (const char*)app->view->page_nav.nav_ctx, sizeof(ctx->ssid) - 1);
+    /* SSID 通过 user_data 传入 (page_navigator 会把它原样传给 builder);
+     * nav_ctx 是废弃的共享槽位, navigate_to() 现在固定置为 NULL, 不能再读它。 */
+    if (user_data) {
+        strncpy(ctx->ssid, (const char*)user_data, sizeof(ctx->ssid) - 1);
     }
 
     Page page = lv_page_create(ctx->ssid[0] ? ctx->ssid : tr(STR_CONNECT),

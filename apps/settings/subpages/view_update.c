@@ -63,7 +63,7 @@ static void add_changelog_lines(lv_obj_t *parent, const char *changelog, int max
                 lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
                 lv_obj_set_width(lbl, LV_PCT(100));
                 lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+                lv_obj_set_style_text_font(lbl, g_cjk_font, 0);   /* changelog 可能含中文 */
                 shown++;
             }
             line = p + 1;
@@ -75,7 +75,7 @@ static void add_changelog_lines(lv_obj_t *parent, const char *changelog, int max
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl, LV_PCT(100));
         lv_obj_set_style_text_color(lbl, lv_color_hex(0x888888), 0);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(lbl, g_cjk_font, 0);   /* changelog 可能含中文 */
     }
 }
 
@@ -231,7 +231,7 @@ static void on_ota_checked(ota_check_result_t result,
         /* 标题直接用版本名 */
         lv_obj_t *title = lv_label_create(info);
         lv_label_set_text(title, new_version ? new_version : "");
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(title, g_cjk_font, 0);   /* 版本名可能含中文 */
         lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);
 
         if (release_date && release_date[0]) {

@@ -149,7 +149,7 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
 
         lv_obj_t* lb_conn = lv_label_create(row_conn);
         lv_label_set_text(lb_conn, ssid);
-        lv_obj_set_style_text_font(lb_conn, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(lb_conn, g_cjk_font, 0);   /* SSID 可能含中文 */
     }
 
     /* ── 扫描按钮 ── */
@@ -215,7 +215,7 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
 
             lv_obj_t* name = lv_label_create(row);
             lv_label_set_text(name, nets[i].ssid);
-            lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_font(name, g_cjk_font, 0);   /* SSID 可能含中文 */
             lv_obj_set_flex_grow(name, 1);
 
             if (nets[i].secured) {
