@@ -54,6 +54,8 @@ static void build_results_content(lv_obj_t *parent) {
     if (sr->channel_count == 0 && sr->episode_count == 0) {
         lv_obj_t *empty = lv_label_create(parent);
         lv_label_set_text(empty, tr(STR_NO_RESULTS_FOUND));
+        /* FLOATING 脱离 flex 布局，让 lv_obj_center 居中生效 */
+        lv_obj_add_flag(empty, LV_OBJ_FLAG_FLOATING);
         lv_obj_center(empty);
         lv_obj_set_style_text_color(empty, lv_color_hex(0x999999), 0);
         return;

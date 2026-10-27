@@ -13,6 +13,7 @@
 #include "../app.h"
 #include "../model.h"
 #include "../controller.h"
+#include "../hal.h"
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
 #include "lv_toast.h"
@@ -336,6 +337,16 @@ static void page_poll_cb(lv_timer_t *timer) {
 static void on_download_clicked(lv_event_t *e) {
     ChannelPageCtx *ctx = (ChannelPageCtx *)lv_event_get_user_data(e);
     if (!ctx) return;
+
+    /* Download tasks persist to the SD card. If the card isn't mounted,
+     * task_store_create() fails (its /sdcard JSON write fails) and the task
+     * silently never lands in the download-task list — so fail loudly here
+     * instead of the misleading "queued" toast. */
+    if (!hal_sdcard_is_mounted()) {
+        lv_toast_show(tr(STR_NO_SD_CARD), 2500);
+        return;
+    }
+
     int cid = ctx->channel_id;
     const Channel *ch = podcast_model_get_channel_by_id(&g_podcast_app, cid);
     const char *ch_name = ch ? ch->title : tr(STR_UNKNOWN);

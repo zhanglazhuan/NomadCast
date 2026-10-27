@@ -161,7 +161,11 @@ static void build_hint(lv_obj_t* parent, const char* msg, bool show_network_link
     lv_label_set_text(label, msg);
     lv_obj_set_style_text_color(label, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
-    lv_obj_set_size(label, 200, 60);
+    /* FLOATING 让 label 脱离 page.container 的 flex 布局，否则 lv_obj_align 的
+     * 居中会被 flex 默认 cross-align(靠左)覆盖。满宽(百分比宽度不触发 CJK
+     * 文本测量)避免"未插入 SD 卡，无本地内容。"这类长提示被 200px 断成两行。 */
+    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(label, LV_PCT(100), 60);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, show_network_link ? -24 : 0);
 

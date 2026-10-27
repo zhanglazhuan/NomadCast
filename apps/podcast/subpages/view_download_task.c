@@ -579,6 +579,8 @@ static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
         lv_obj_t* empty = lv_label_create(parent);
         lv_label_set_text(empty, tr(STR_NO_DOWNLOAD_TASKS));
         lv_obj_set_style_text_color(empty, lv_color_hex(0xAAAAAA), 0);
+        /* FLOATING 脱离 list_container 的 flex，让 lv_obj_center 居中生效 */
+        lv_obj_add_flag(empty, LV_OBJ_FLAG_FLOATING);
         lv_obj_center(empty);
         return parent;
     }

@@ -96,7 +96,9 @@ static void build_wifi_offline(lv_obj_t* parent, NetworkPage* np) {
     lv_label_set_text(label, tr(STR_NO_NETWORK));
     lv_obj_set_style_text_color(label, lv_color_hex(0x666666), 0);
     lv_obj_set_style_text_font(label, g_cjk_font, 0);
-    lv_obj_set_size(label, 200, LV_SIZE_CONTENT);
+    /* FLOATING 脱离 page.container 的 flex，让 lv_obj_align 的居中生效 */
+    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(label, LV_PCT(100), LV_SIZE_CONTENT);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, -30);
