@@ -27,7 +27,20 @@ static esp_netif_t     *s_sta_netif = NULL;     /* saved for deinit cleanup */
 
 #define WIFI_CONNECTED_BIT  BIT0
 #define WIFI_FAIL_BIT       BIT1
-#define WIFI_TIMEOUT_MS     15000
+#define WIFI_TIMEOUT_MS     20000
+/* Connection retries before giving up (needs WIFI_ALL_CHANNEL_SCAN to apply).
+ * The AP sits at ~-94 dBm, which is marginal — a single attempt times out with
+ * "No AP found", so give the driver several chances. */
+#define WIFI_CONNECT_RETRIES 5
+
+/* Max STA TX power, in 0.25 dBm units. 80 → 20 dBm (the ESP32-S3 default).
+ * We used to clamp this to 8.5 dBm to fix "Auth expired" (reason 2), but that
+ * turned out to be a misdiagnosis: the AP here sits at ~-95 dBm (far away),
+ * and an 8.5 dBm ceiling meant our probe/assoc frames never reached the AP at
+ * all → "No AP found" (reason 201). Keep the full 20 dBm so the radio can
+ * reach a weak/distant AP; the driver's rate adaptation backs off power on its
+ * own when the AP is close. */
+#define WIFI_MAX_TX_POWER_Q1  80
 
 /* Last connect result (consumed once by hal_wifi_get_connect_result) */
 static bool s_has_result  = false;
@@ -155,6 +168,12 @@ bool hal_wifi_init(void)
      * DTIM beacons, collapsing TCP download throughput to ~16 KB/s). Keep the
      * modem awake for the streaming/download path. */
     esp_wifi_set_ps(WIFI_PS_NONE);
+
+    /* Full 20 dBm TX power. The AP is far (~-95 dBm), so we need max output
+     * for probe/assoc frames to reach it; see WIFI_MAX_TX_POWER_Q1. */
+    esp_err_t txp = esp_wifi_set_max_tx_power(WIFI_MAX_TX_POWER_Q1);
+    ESP_LOGI(TAG, "TX power -> %d (0.25dBm): %s", WIFI_MAX_TX_POWER_Q1,
+             txp == ESP_OK ? "ok" : esp_err_to_name(txp));
 
     s_wifi_evt = xEventGroupCreate();
     s_wifi_initialized = true;
@@ -295,6 +314,15 @@ void hal_wifi_connect(const char *ssid, const char *password)
     ESP_LOGI(TAG, "Connecting to \"%s\"…", ssid);
 
     wifi_config_t wifi_cfg = {};
+    /* Fresh all-channel scan on connect. The internal scan cache may be stale
+     * (populated minutes ago at boot); a stale cache makes the driver bail with
+     * "Haven't to connect to a suitable AP now!" → reason 201. ALL_CHANNEL_SCAN
+     * forces the driver to re-scan every channel so it always finds the AP. */
+    wifi_cfg.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    /* At -94 dBm the first association attempt often times out ("No AP found").
+     * failure_retry_cnt makes the driver retry the whole connect several times
+     * without us having to tear down and re-arm the event group ourselves. */
+    wifi_cfg.sta.failure_retry_cnt = WIFI_CONNECT_RETRIES;
     strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid) - 1);
     strncpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password) - 1);
 
@@ -342,13 +370,16 @@ void hal_wifi_connect_bssid(const char *ssid, const char *password,
         return;
     }
 
-    if (hal_wifi_is_connected()) {
-        ESP_LOGI(TAG, "Disconnecting current AP before connecting to \"%s\"", ssid);
-        xEventGroupClearBits(s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
-        esp_wifi_disconnect();
-        xEventGroupWaitBits(s_wifi_evt, WIFI_FAIL_BIT,
-                            pdFALSE, pdFALSE, pdMS_TO_TICKS(3000));
-    }
+    /* Always reset the WiFi state machine before connecting — same rationale
+     * as hal_wifi_connect().  A previous failed connect (e.g. reason 201)
+     * leaves the STA in an intermediate state where esp_wifi_connect() reports
+     * "Haven't to connect to a suitable AP now!" and re-fails.  In that state
+     * hal_wifi_is_connected() returns false, so a conditional reset never
+     * fires — it must be unconditional. */
+    esp_wifi_disconnect();
+    xEventGroupClearBits(s_wifi_evt, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+    xEventGroupWaitBits(s_wifi_evt, WIFI_FAIL_BIT,
+                        pdFALSE, pdFALSE, pdMS_TO_TICKS(1000));
 
     ESP_LOGI(TAG, "Connecting to \"%s\" (ch %d, "
              "%02x:%02x:%02x:%02x:%02x:%02x)…",
@@ -356,7 +387,8 @@ void hal_wifi_connect_bssid(const char *ssid, const char *password,
              bssid[3],bssid[4],bssid[5]);
 
     wifi_config_t wifi_cfg = {
-        .sta = { .channel = channel },
+        .sta = { .channel = channel, .scan_method = WIFI_ALL_CHANNEL_SCAN,
+                 .failure_retry_cnt = WIFI_CONNECT_RETRIES },
     };
     strncpy((char *)wifi_cfg.sta.ssid, ssid, sizeof(wifi_cfg.sta.ssid) - 1);
     strncpy((char *)wifi_cfg.sta.password, password, sizeof(wifi_cfg.sta.password) - 1);

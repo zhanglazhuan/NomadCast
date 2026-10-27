@@ -24,6 +24,9 @@ extern const lv_font_t *g_cjk_font;
 
 typedef struct {
     char ssid[32];
+    uint8_t bssid[6];   /* from scan — for BSSID-direct connect (avoids "No AP found") */
+    uint8_t channel;
+    bool has_bssid;
     lv_obj_t* pwd_ta;
     lv_obj_t* kb;
 } ConnectCtx;
@@ -106,8 +109,13 @@ static void do_connect(ConnectCtx* ctx) {
     const char* pwd = lv_textarea_get_text(ctx->pwd_ta);
     ESP_LOGI(TAG, "ssid='%s' pwd='%s'", ctx->ssid, pwd);
 
-    // 调用 HAL 发起连接 (阻塞)
-    hal_wifi_connect(ctx->ssid, pwd);
+    // 调用 HAL 发起连接 (阻塞)。优先用扫描到的 BSSID+channel 直连，
+    // 绕过 esp_wifi_connect() 的内部扫描缓存竞态 (否则报 "No AP found")。
+    if (ctx->has_bssid) {
+        hal_wifi_connect_bssid(ctx->ssid, pwd, ctx->bssid, ctx->channel);
+    } else {
+        hal_wifi_connect(ctx->ssid, pwd);
+    }
 
     // 检查结果，成功则保存密码
     bool ok = false;
@@ -145,10 +153,15 @@ static lv_obj_t* build_wifi_connect_page(struct SettingsApp* app, void* user_dat
     ConnectCtx* ctx = malloc(sizeof(ConnectCtx));
     memset(ctx, 0, sizeof(ConnectCtx));
 
-    /* SSID 通过 user_data 传入 (page_navigator 会把它原样传给 builder);
+    /* 网络信息通过 user_data 传入 (page_navigator 会把它原样传给 builder);
+     * 现在是完整 WifiNetwork*, 拿到 SSID + BSSID + channel。
      * nav_ctx 是废弃的共享槽位, navigate_to() 现在固定置为 NULL, 不能再读它。 */
     if (user_data) {
-        strncpy(ctx->ssid, (const char*)user_data, sizeof(ctx->ssid) - 1);
+        const WifiNetwork* net = (const WifiNetwork*)user_data;
+        strncpy(ctx->ssid, net->ssid, sizeof(ctx->ssid) - 1);
+        memcpy(ctx->bssid, net->bssid, sizeof(ctx->bssid));
+        ctx->channel = net->channel;
+        ctx->has_bssid = true;
     }
 
     Page page = lv_page_create(ctx->ssid[0] ? ctx->ssid : tr(STR_CONNECT),

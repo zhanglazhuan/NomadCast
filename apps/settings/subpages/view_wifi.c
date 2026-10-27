@@ -60,7 +60,8 @@ static void async_scan_timer_cb(lv_timer_t *t)
 /* ── 网络点击 ──────────────────────────────────────────────────────────────── */
 
 static void on_network_clicked(lv_event_t* e) {
-    const char* ssid = lv_event_get_user_data(e);
+    const WifiNetwork* net = (const WifiNetwork*)lv_event_get_user_data(e);
+    const char* ssid = net->ssid;
 
     /* Try auto-connect with saved password first */
     if (settings_model_auto_connect(&g_settings_app, ssid)) {
@@ -71,8 +72,9 @@ static void on_network_clicked(lv_event_t* e) {
         return;
     }
 
-    /* No saved password (or saved password was wrong) — show manual connect page */
-    PAGE_NAVIGATE_TO((&g_settings_app), SETTINGS_PAGE_WIFI, SETTINGS_PAGE_WIFI_CONNECT, (void*)ssid);
+    /* No saved password (or saved password was wrong) — show manual connect page.
+     * Pass the whole scan entry so the connect page can BSSID-connect. */
+    PAGE_NAVIGATE_TO((&g_settings_app), SETTINGS_PAGE_WIFI, SETTINGS_PAGE_WIFI_CONNECT, (void*)net);
 }
 
 /* ── 构建 WIFI 页面 ────────────────────────────────────────────────────────── */
@@ -201,8 +203,8 @@ static lv_obj_t* build_wifi_page(struct SettingsApp* app, void* user_data) {
             lv_obj_set_style_pad_column(row, 8, 0);
             lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
-            // 点击进入连接页，通过 user_data 传 SSID
-            lv_obj_add_event_cb(row, on_network_clicked, LV_EVENT_CLICKED, (void*)nets[i].ssid);
+            // 点击进入连接页，通过 user_data 传整个扫描项 (SSID + BSSID + channel)
+            lv_obj_add_event_cb(row, on_network_clicked, LV_EVENT_CLICKED, (void*)&nets[i]);
 
             lv_obj_t* sig = lv_label_create(row);
             lv_label_set_text(sig, LV_SYMBOL_WIFI);
