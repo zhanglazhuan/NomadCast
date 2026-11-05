@@ -22,6 +22,7 @@
 #include "launcher.h"
 #include "app_manager.h"
 #include "lang.h"
+#include "app_event.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_forward_media;
@@ -59,6 +60,10 @@ typedef struct {
     int               dot_count;      // 加载动画点号计数
     int               dot_dir;        // 加载动画方向
 } NetworkPage;
+
+/* Active network page — the artwork-ready event refreshes it in place. */
+static NetworkPage *s_active_net_page = NULL;
+static bool         s_net_evt_registered = false;
 
 /* 前向声明 — timer 回调中引用 */
 static void stop_all_timers(NetworkPage* np);
@@ -125,6 +130,7 @@ static void on_page_delete(lv_event_t* e) {
     if (!np) return;
     stop_all_timers(np);
     if (np->ctx) { free(np->ctx); np->ctx = NULL; }
+    if (s_active_net_page == np) s_active_net_page = NULL;
     free(np);
     printf("[INF] Network page timers stopped\n"); fflush(stdout);
 }
@@ -181,6 +187,7 @@ static void poll_ready_cb(lv_timer_t* timer) {
 
     if (st == NET_STATE_READY) {
         stop_all_timers(np);
+        np->state = NP_STATE_ONLINE;
 
         /* 数据就绪 → 构建内容 */
         lv_obj_clean(np->container);
@@ -318,6 +325,18 @@ static void refresh_list(NetworkPageCtx* ctx, int cat) {
     bc->albums = albums;
     bc->count  = total;
     lv_timer_create(build_card_chunk_cb, 1, bc);
+}
+
+/* ── Artwork ready → rebuild the list so cached JPEGs show ───────────── */
+
+static void on_artwork_ready(app_event_t event, const void *data) {
+    (void)data;
+    if (event != APP_EVENT_ARTWORK_READY) return;
+    NetworkPage *np = s_active_net_page;
+    if (!np || !np->content_built || np->state != NP_STATE_ONLINE) return;
+    NetworkPageCtx *ctx = np->ctx;
+    if (!ctx || !ctx->content) return;
+    refresh_list(ctx, ctx->active_cat);
 }
 
 static void on_dropdown_changed(lv_event_t* e) {
@@ -531,6 +550,11 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
     NetworkPage* np = malloc(sizeof(NetworkPage));
     memset(np, 0, sizeof(NetworkPage));
     np->container = page.container;
+    s_active_net_page = np;
+    if (!s_net_evt_registered) {
+        app_event_register(on_artwork_ready);
+        s_net_evt_registered = true;
+    }
 
     /* ── WiFi check first — gate all network operations ── */
     if (!hal_wifi_is_connected()) {

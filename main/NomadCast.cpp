@@ -90,7 +90,7 @@ extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 #define LCD_W           240
 #define LCD_H           320
 #define SPI_HOST_ID     SPI2_HOST
-#define SPI_FREQ_HZ     (40 * 1000 * 1000)
+#define SPI_FREQ_HZ     (60 * 1000 * 1000)
 
 /* ---- Display (ST7789 via SPI2, esp_lcd) — proven from t_ui ---- */
 static esp_lcd_panel_handle_t display_init(void)
@@ -100,7 +100,7 @@ static esp_lcd_panel_handle_t display_init(void)
         .sclk_io_num = PIN_SPI_SCK, .quadwp_io_num = -1, .quadhd_io_num = -1,
         .data4_io_num = -1, .data5_io_num = -1,
         .data6_io_num = -1, .data7_io_num = -1,
-        .max_transfer_sz = LCD_W * 20 * 2,  /* match flush buffer height */
+        .max_transfer_sz = LCD_W * 40 * 2,  /* match flush buffer height */
         .flags = 0, .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO, .intr_flags = 0,
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST_ID, &spi_cfg, SPI_DMA_CH_AUTO));
@@ -380,7 +380,7 @@ static void lvgl_display_init(esp_lcd_panel_handle_t panel)
     lv_display_set_user_data(display, panel);
     lv_display_set_flush_cb(display, lvgl_flush_cb);
 
-    size_t buf_sz = LCD_W * 20 * sizeof(lv_color_t);
+    size_t buf_sz = LCD_W * 40 * sizeof(lv_color_t);
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(
         buf_sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(

@@ -79,8 +79,12 @@ static lv_obj_t *build_playing_page(struct RadioApp *app, void *user_data) {
     lv_obj_set_flex_flow(main, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_all(main, 0, 0);
-    lv_obj_set_scrollbar_mode(main, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_dir(main, LV_DIR_NONE);
+    /* 整体上移一点：header 是透明的(仅返回键)，内容应相对可视区(状态栏以下)居中，
+     * 而不是相对 header 下方容器居中，否则会偏下 14px。加底部 padding 让 flex
+     * 居中区域上移。 */
+    lv_obj_set_style_pad_bottom(main, 28, 0);
+    lv_obj_set_scrollbar_mode(main, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scroll_dir(main, LV_DIR_VER);
 
     /* cover */
     lv_obj_t *cover = lv_obj_create(main);
@@ -98,6 +102,7 @@ static lv_obj_t *build_playing_page(struct RadioApp *app, void *user_data) {
     /* LIVE badge */
     lv_obj_t *live = lv_label_create(main);
     lv_label_set_text(live, tr(STR_RADIO_LIVE));
+    lv_obj_set_height(live, 20);
     lv_obj_set_style_text_color(live, lv_color_hex(0x1E88E5), 0);
     lv_obj_set_style_text_font(live, g_cjk_font, 0);
     lv_obj_set_style_margin_top(live, 8, 0);
@@ -107,6 +112,7 @@ static lv_obj_t *build_playing_page(struct RadioApp *app, void *user_data) {
     lv_label_set_text(title, tname);
     lv_label_set_long_mode(title, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_width(title, LV_PCT(85));
+    lv_obj_set_height(title, 20);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(title, g_cjk_font, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0x333333), 0);

@@ -27,6 +27,7 @@ typedef enum {
     APP_EVENT_KEY_VOL_UP,            /* data: NULL — physical volume-up key */
     APP_EVENT_KEY_VOL_DOWN,          /* data: NULL — physical volume-down key */
     APP_EVENT_WEATHER_UPDATED,       /* data: NULL — weather worker finished a fetch */
+    APP_EVENT_ARTWORK_READY,         /* data: NULL — podcast artwork cache finished updating */
 } app_event_t;
 
 /* ── Event data structs ─────────────────────────────────────────────────── */
