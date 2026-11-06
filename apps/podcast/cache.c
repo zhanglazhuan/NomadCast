@@ -57,6 +57,9 @@ static struct {
     time_t saved_at;
 } g_entries[CACHE_COUNT];
 
+/* Storefront code the chart cache was fetched for (persisted in meta.json). */
+static char g_chart_country[8] = "";
+
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 
 static void ensure_dir(const char *path) {
@@ -147,6 +150,17 @@ static void meta_read(void) {
             g_entries[t].saved_at = (time_t)val;
         }
     }
+
+    {
+        const char *p = strstr(buf, "\"chart_country\":\"");
+        if (p) {
+            p += strlen("\"chart_country\":\"");
+            int i = 0;
+            while (*p && *p != '"' && i < (int)sizeof(g_chart_country) - 1)
+                g_chart_country[i++] = *p++;
+            g_chart_country[i] = '\0';
+        }
+    }
 }
 
 static void meta_write(void) {
@@ -154,9 +168,10 @@ static void meta_write(void) {
     FILE *f = fopen(META_FILE, "w");
     if (!f) return;
 
-    fprintf(f, "{\"chart_at\":%lld,\"lookup_at\":%lld,\"ttl\":%d}\n",
+    fprintf(f, "{\"chart_at\":%lld,\"lookup_at\":%lld,\"chart_country\":\"%s\",\"ttl\":%d}\n",
             (long long)g_entries[CACHE_CHART].saved_at,
             (long long)g_entries[CACHE_LOOKUP].saved_at,
+            g_chart_country,
             CACHE_TTL_SECONDS);
     fclose(f);
 }
@@ -232,6 +247,7 @@ void cache_invalidate(cache_type_t type) {
     if (type >= CACHE_COUNT) return;
     g_entries[type].valid = false;
     g_entries[type].saved_at = 0;
+    if (type == CACHE_CHART) g_chart_country[0] = '\0';
     meta_write();
     CACHE_LOGW("[CACHE] Invalidated type %d\n", (int)type);
 }
@@ -242,6 +258,18 @@ void cache_purge(cache_type_t type) {
     cache_invalidate(type);
     unlink(path);
     CACHE_LOGW("[CACHE] Purged %s\n", path);
+}
+
+/* ── Chart cache country tracking ─────────────────────────────────────────── */
+
+void cache_chart_set_country(const char *country) {
+    if (!country) { g_chart_country[0] = '\0'; return; }
+    snprintf(g_chart_country, sizeof(g_chart_country), "%s", country);
+}
+
+bool cache_chart_matches(const char *country) {
+    if (!country || !g_chart_country[0]) return false;
+    return strcmp(g_chart_country, country) == 0;
 }
 
 /* ── Lookup KV cache ─────────────────────────────────────────────────────── */

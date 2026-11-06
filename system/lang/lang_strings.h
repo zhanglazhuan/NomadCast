@@ -283,5 +283,8 @@ enum {
     STR_WEATHER_ERR_TIMEOUT,
     STR_WEATHER_ERR_SERVER,
 
+    /* Settings — General (country/region) */
+    STR_COUNTRY_REGION,
+
     STR_COUNT
 };

@@ -17,6 +17,8 @@
 #include "sleep_monitor.h"
 #include "flash_store.h"
 #include "lang.h"
+#include "countries.h"
+#include "app_event.h"
 #include "app_manager.h"
 #include "esp_system.h"
 #include "esp_log.h"
@@ -50,6 +52,16 @@ static void on_timezone_changed(lv_event_t* e) {
     lv_obj_t* dd = lv_event_get_target(e);
     int sel = lv_dropdown_get_selected(dd);
     settings_model_set_timezone(&g_settings_app, sel);
+}
+
+/* ── 所在国家变更回调 ──────────────────────────────────────────────────────── */
+
+static void on_country_changed(lv_event_t* e) {
+    lv_obj_t* dd = lv_event_get_target(e);
+    int sel = lv_dropdown_get_selected(dd);
+    const char* code = country_code_at(sel);
+    flash_set_str("podcast", "country", code);
+    app_event_fire(APP_EVENT_COUNTRY_CHANGED, NULL);
 }
 
 /* ── 睡眠超时选择回调 ────────────────────────────────────────────────────── */
@@ -238,6 +250,22 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     int tz = settings_model_get_timezone(app);
     int lang = settings_model_get_language(app);
     bool fmt24 = settings_model_get_time_format_24h(app);
+
+    /* ── 所在国家 ── */
+    char cc[8];
+    flash_get_str("podcast", "country", cc, sizeof(cc), "cn");
+    int country_idx = country_index_of(cc);
+    if (country_idx < 0) country_idx = 0;
+
+    lv_obj_t* row_country = create_setting_row(cont, tr(STR_COUNTRY));
+    lv_obj_t* dd_country = lv_dropdown_create(row_country);
+    char country_opts[512];
+    country_options_str(country_opts, sizeof(country_opts));
+    lv_dropdown_set_options(dd_country, country_opts);
+    lv_dropdown_set_selected(dd_country, country_idx);
+    lv_obj_set_width(dd_country, LV_PCT(100));
+    dropdown_set_cjk(dd_country);
+    lv_obj_add_event_cb(dd_country, on_country_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     /* ── 时区 ── */
     lv_obj_t* row_tz = create_setting_row(cont, tr(STR_TIMEZONE));

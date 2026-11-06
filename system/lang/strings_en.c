@@ -274,4 +274,7 @@ const char *const strings_en[STR_COUNT] = {
     "TLS verify failed (clock)",
     "Request timed out",
     "Server error",
+
+    /* Settings — General (country/region) */
+    "Country/Region",
 };

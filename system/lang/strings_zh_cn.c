@@ -274,4 +274,7 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "证书校验失败(时间未同步)",
     "请求超时",
     "服务器错误",
+
+    /* Settings — General (country/region) */
+    "所在国家",
 };

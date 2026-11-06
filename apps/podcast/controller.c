@@ -318,6 +318,12 @@ static void on_wifi_event(app_event_t event, const void *data)
         dl_resume_pending(&g_podcast_app);
     } else if (event == APP_EVENT_KEY_PLAY_PAUSE) {
         podcast_controller_toggle_play_pause(&g_podcast_app);
+    } else if (event == APP_EVENT_COUNTRY_CHANGED) {
+        /* Region changed — the chart cache is keyed without country and lives
+         * 15 min, so drop it and reset to IDLE; the network page re-fetches on
+         * next open (podcast_country() reads the fresh NVS value). */
+        cache_purge(CACHE_CHART);
+        podcast_model_set_net_state(&g_podcast_app, NET_STATE_IDLE, NULL);
     }
 }
 
