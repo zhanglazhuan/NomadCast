@@ -4,7 +4,7 @@
  * Wraps espressif/button to provide app-level key events.
  * Supports short-press and long-press detection on all physical keys.
  *
- * Pin mapping: board/leisound_v1.h
+ * Pin mapping: boards/esp32s3/nomadcast.h
  */
 
 #pragma once

@@ -1,3 +1,4 @@
+#include "nomadcast.h"
 /*
  * NomadCast — FlashDB validation & performance test (debug/t_flashdb)
  *
@@ -25,10 +26,10 @@
 static const char *TAG = "t_flashdb";
 
 /* ── Leisound V1 pins ─────────────────────────────────────────────────────── */
-#define PIN_EN_POWER  GPIO_NUM_46
-#define PIN_SD_CLK    GPIO_NUM_1
-#define PIN_SD_CMD    GPIO_NUM_14
-#define PIN_SD_DAT0   GPIO_NUM_2
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define PIN_SD_DAT0 NOMADCAST_PIN_SD_DAT0
 #define MOUNT_POINT   "/sdcard"
 #define DB_DIR        "/sdcard/.nomadcast/db"
 

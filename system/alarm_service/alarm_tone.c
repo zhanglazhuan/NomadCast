@@ -19,7 +19,7 @@
 
 #include "driver/i2s_std.h"
 
-#include "nomadcast_v1.h"
+#include "nomadcast.h"
 
 static const char *TAG = "alarm_tone";
 

@@ -1,0 +1,100 @@
+I (15358) t_CST726: STATUS reads=0 errors=1502 changes=0 no_dataW (41098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (41098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (42098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (42098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (43098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (43098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (44098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (44098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (45098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (45098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (45358) t_CST726: STATUS reads=0 errors=4502 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (46098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (46098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (47098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (47098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (48098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (48098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (49098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (49098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (50098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (50098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (50358) t_CST726: STATUS reads=0 errors=5002 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (51098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (51098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (52098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (52098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (53098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (53098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (54098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (54098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (55098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (55098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (55358) t_CST726: STATUS reads=0 errors=5502 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (56098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (56098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (57098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (57098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (58098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (58098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (59098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (59098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (60098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (60098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (60358) t_CST726: STATUS reads=0 errors=6002 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (61098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (61098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (62098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (62098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (63098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (63098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (64098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (64098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (65098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (65098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (65358) t_CST726: STATUS reads=0 errors=6502 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (66098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (66098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (67098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (67098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (68098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (68098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (69098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (69098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (70098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (70098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (70358) t_CST726: STATUS reads=0 errors=7002 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (71098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (71098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (72098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (72098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (73098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (73098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (74098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (74098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (75098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (75098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (75358) t_CST726: STATUS reads=0 errors=7502 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (76098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (76098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (77098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (77098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (78098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (78098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (79098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (79098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (80098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (80098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (80358) t_CST726: STATUS reads=0 errors=8002 changes=0 no_data=0 IRQ_edges=0 INT=1
+W (81098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (81098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (82098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (82098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (83098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (83098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (84098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (84098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+W (85098) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (85098) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (85358) t_CST726: STATUS reads=0 errors=8502 changes=0 no_data=0 IRQ_edges=0 INT=1
+W

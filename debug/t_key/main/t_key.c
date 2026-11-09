@@ -1,24 +1,6 @@
-/*
- * NomadCast — Key Button Test (event printing + screen)
- *
- *   Button | GPIO | 功能
- *   -------|------|------
- *   Vol-   |   6  | 音量减
- *   Vol+   |  17  | 音量加
- *   Stop   |   7  | 停止
- *   OnOff  |   5  | 开关
- *   HP-DET |  18  | 耳机插入检测
- *   USB    |   3  | USB VBUS 检测 (HIGH=USB已插入)
- *
- * 仅响应按键事件并打印，不做真实音频 / 音量 / 播放控制。
- *
- * 事件同时写到屏幕：拔掉 USB 后 USB Serial/JTAG 串口随之消失，
- * 屏幕成为唯一记录渠道。USB 状态(大字号) + 事件滚动日志都显示在屏幕上。
- *
- * === Leisound V1 Pins ===
- *   EN_PWR   = GPIO46   全板外设电源
- *   LCD_PWR  = GPIO43   屏幕电源
- *   BL       = GPIO12   背光
+#include "nomadcast.h"
+/* PCB V1.2 key/display test. Pin definitions: nomadcast.h.
+ * USB_DETE is active LOW; it is separate from the USB wake input.
  */
 
 #include <stdio.h>
@@ -39,7 +21,6 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_st7789.h"
 #include "lvgl.h"
-#include "esp_adc/adc_oneshot.h"
 
 static const char *TAG = "t_key";
 
@@ -47,29 +28,29 @@ static const char *TAG = "t_key";
  * Pin Definitions
  * ======================================================================== */
 
-#define BTN_VOL_DOWN    GPIO_NUM_6
-#define BTN_VOL_UP      GPIO_NUM_17
-#define BTN_STOP        GPIO_NUM_7
-#define BTN_ONOFF       GPIO_NUM_5
-#define PIN_HP_DET      GPIO_NUM_18   /* 耳机插入检测 (AMP_EN) */
-#define PIN_USB_VBUS    GPIO_NUM_3    /* USB VBUS 检测 (HIGH=USB已插入) */
+#define BTN_VOL_DOWN NOMADCAST_PIN_KEY_VOL_DOWN
+#define BTN_VOL_UP NOMADCAST_PIN_KEY_VOL_UP
+#define BTN_STOP NOMADCAST_PIN_KEY_STOP
+#define BTN_ONOFF NOMADCAST_PIN_KEY_POWER
+#define PIN_HP_DET NOMADCAST_PIN_HP_DETECT
+#define PIN_USB_VBUS NOMADCAST_PIN_USB_VBUS
 
-#define PIN_EN_POWER    GPIO_NUM_46   /* 全板外设电源 */
-#define PIN_LCD_POWER   GPIO_NUM_43   /* 屏幕电源 (HIGH=ON) */
-#define PIN_BACKLIGHT   GPIO_NUM_12   /* 背光 (HIGH=ON) */
-#define PIN_LCD_RST     GPIO_NUM_40   /* 硬件复位 — 与 TP_RST 共用 */
-#define PIN_TP_INT      GPIO_NUM_39   /* 触摸中断 — 与 LCD_INT 共用 */
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_LCD_POWER NOMADCAST_PIN_LCD_POWER
+#define PIN_BACKLIGHT NOMADCAST_PIN_LCD_BL
+#define PIN_LCD_RST NOMADCAST_PIN_LCD_RST
+#define PIN_TP_INT NOMADCAST_PIN_TP_INT
 
-#define PIN_SPI_SCK     GPIO_NUM_21
-#define PIN_SPI_MOSI    GPIO_NUM_14
-#define PIN_SPI_MISO    GPIO_NUM_13
-#define PIN_LCD_CS      GPIO_NUM_48
-#define PIN_LCD_DC      GPIO_NUM_47
+#define PIN_SPI_SCK NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO NOMADCAST_PIN_SPI_MISO
+#define PIN_LCD_CS NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC NOMADCAST_PIN_LCD_DC
 
 #define LCD_W           240
 #define LCD_H           320
 #define SPI_HOST_ID     SPI2_HOST
-#define SPI_FREQ_HZ     (40 * 1000 * 1000)
+#define SPI_FREQ_HZ     (20 * 1000 * 1000)
 
 /* ========================================================================
  * Screen Event Queue — 事件进队列，在 LVGL 线程统一刷新（LVGL 非线程安全）。
@@ -177,7 +158,7 @@ static void btn_task(void *arg)
                 int level = debounced_level(PIN_HP_DET);
                 if (level != s_last_hp_level) {
                     s_last_hp_level = level;
-                    ESP_LOGI(TAG, "[HP] headphone %s (GPIO18=%d)",
+                    ESP_LOGI(TAG, "[HP] headphone %s (GPIO14=%d)",
                              level ? "INSERTED" : "REMOVED", level);
                     ui_post_log("t=%lus HP %s", (unsigned long)uptime_s(),
                                 level ? "insert" : "remove");
@@ -196,99 +177,36 @@ static void btn_task(void *arg)
 }
 
 /* ========================================================================
- * USB VBUS (GPIO3) Monitor — 轮询 + 防抖，只记录电平变化
+ * USB VBUS (GPIO18) Monitor — 轮询 + 防抖，只记录电平变化
  * ======================================================================== */
 
 static int s_last_vbus = -1;
-static volatile int s_vbus_adc_raw = -1;   /* 最近一次 ADC 原始值，供屏幕实时显示 */
-static volatile int s_vbus_adc_mv = -1;    /* 粗略电压(mV) */
 
-/* 前向声明：ADC 函数定义在 usb_vbus_init 之后 */
-static int adc_vbus_read_raw(void);
-static int adc_vbus_approx_mv(int raw);
-
-/* ADC 只在 usb_monitor_task 里读(单一读者)，避免和 LVGL 线程并发读冲突 */
 static void usb_monitor_task(void *arg)
 {
     (void)arg;
-    /* 与耳机基线同理，跳过启动抖动 */
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    s_last_vbus = gpio_get_level(PIN_USB_VBUS);
-    s_vbus_adc_raw = adc_vbus_read_raw();
-    s_vbus_adc_mv = adc_vbus_approx_mv(s_vbus_adc_raw);
-    ui_post_usb(s_last_vbus);
-    ui_post_log("t=%lus USB: %s", (unsigned long)uptime_s(),
-                s_last_vbus ? "connected" : "disconnected");
-    ESP_LOGI(TAG, "[USB] GPIO3=%d (%s) ADC=%d ~%dmV", s_last_vbus,
-             s_last_vbus ? "INSERTED" : "REMOVED", s_vbus_adc_raw, s_vbus_adc_mv);
-
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-        int level = debounced_level(PIN_USB_VBUS);
-        /* 每轮都刷新 ADC，屏幕据此实时显示真实电压 */
-        s_vbus_adc_raw = adc_vbus_read_raw();
-        s_vbus_adc_mv = adc_vbus_approx_mv(s_vbus_adc_raw);
-        if (level != s_last_vbus) {
-            s_last_vbus = level;
-            ui_post_usb(level);
-            ui_post_log("t=%lus USB: %s", (unsigned long)uptime_s(),
-                        level ? "connected" : "disconnected");
-            ESP_LOGI(TAG, "[USB] GPIO3=%d (%s) ADC=%d ~%dmV", level,
-                     level ? "INSERTED" : "REMOVED", s_vbus_adc_raw, s_vbus_adc_mv);
+        int connected = debounced_level(PIN_USB_VBUS) == NOMADCAST_USB_DETECT_ACTIVE_LEVEL;
+        if (connected != s_last_vbus) {
+            s_last_vbus = connected;
+            ui_post_usb(connected);
+            ui_post_log("t=%lus USB: %s", (unsigned long)uptime_s(), connected ? "connected" : "disconnected");
+            ESP_LOGI(TAG, "USB_DETE GPIO%d=%d: %s", PIN_USB_VBUS,
+                     gpio_get_level(PIN_USB_VBUS), connected ? "INSERTED" : "REMOVED");
         }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 static void usb_vbus_init(void)
 {
-    gpio_config_t vbus = {
+    gpio_config_t config = {
         .pin_bit_mask = BIT64(PIN_USB_VBUS),
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,   /* 悬空视为未插入 */
-        .intr_type    = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
-    ESP_ERROR_CHECK(gpio_config(&vbus));
-}
-
-/* ========================================================================
- * ADC 诊断 — 没有万用表时，用 ESP32 自带 ADC(ADC1_CH2=GPIO3) 量 GPIO3 真实电压
- * 关掉内部上下拉，读到的是外部检测电路(分压+二极管)的实际输出：
- *   USB 插着 +5V 轨正常 → ~2.3V (分压 2.5V - 肖特基压降) → 低于 2.475V 阈值 → 读 LOW
- *   USB 插着但 +5V 轨没起来 → ~0V
- *   电路实际给了 HIGH → ~3V+(12dB 衰减量程顶到 ~3.1V)
- * ======================================================================== */
-
-static adc_oneshot_unit_handle_t s_adc1;
-
-static void adc_vbus_init(void)
-{
-    adc_oneshot_unit_init_cfg_t init = {
-        .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init, &s_adc1));
-
-    adc_oneshot_chan_cfg_t chan = {
-        .atten = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, ADC_CHANNEL_2, &chan)); /* GPIO3=ADC1_CH2 */
-    gpio_set_pull_mode(PIN_USB_VBUS, GPIO_FLOATING);   /* 诊断：量真实外部电压，别让内部上下拉干扰 */
-}
-
-static int adc_vbus_read_raw(void)
-{
-    int raw = 0;
-    if (adc_oneshot_read(s_adc1, ADC_CHANNEL_2, &raw) == ESP_OK) return raw;
-    return -1;
-}
-
-/* 粗略换算：12dB 衰减 0~3.1V 满量程，够区分 0V / 2.3V / 3V+ */
-static int adc_vbus_approx_mv(int raw)
-{
-    if (raw < 0) return -1;
-    return raw * 3100 / 4095;
+    ESP_ERROR_CHECK(gpio_config(&config));
 }
 
 /* ========================================================================
@@ -300,7 +218,7 @@ static char s_log_ring[LOG_MAX_LINES][28];
 static int  s_log_count = 0;
 
 static lv_obj_t *s_usb_state_label;   /* font 20 — 大字号 USB 状态 */
-static lv_obj_t *s_usb_raw_label;     /* font 14 — GPIO3 原始电平 */
+static lv_obj_t *s_usb_raw_label;     /* font 14 — GPIO18 原始电平 */
 static lv_obj_t *s_log_label;         /* font 14 — 事件滚动日志 */
 
 static void ui_apply_events(void)
@@ -313,7 +231,7 @@ static void ui_apply_events(void)
                               on ? "USB: CONNECTED" : "USB: DISCONNECTED");
             lv_obj_set_style_text_color(s_usb_state_label,
                                         on ? lv_color_hex(0x2ECC40) : lv_color_hex(0xFF4136), 0);
-            lv_label_set_text_fmt(s_usb_raw_label, "GPIO3=%d  t=%lus",
+            lv_label_set_text_fmt(s_usb_raw_label, "USB=%d  t=%lus",
                                   m.level, (unsigned long)uptime_s());
         } else {
             if (s_log_count >= LOG_MAX_LINES) {
@@ -335,15 +253,8 @@ static void ui_apply_events(void)
         }
     }
 
-    /* 实时显示 GPIO3 真实电压(ADC 诊断)：数字电平 vs 实际电压，一眼看出是不是分压不够 */
-    if (s_vbus_adc_raw >= 0) {
-        lv_label_set_text_fmt(s_usb_raw_label, "GPIO3=%d  ~%d.%03dV",
-                              gpio_get_level(PIN_USB_VBUS),
-                              s_vbus_adc_mv / 1000, s_vbus_adc_mv % 1000);
-    } else {
-        lv_label_set_text_fmt(s_usb_raw_label, "GPIO3=%d  ADC-ERR",
-                              gpio_get_level(PIN_USB_VBUS));
-    }
+    lv_label_set_text_fmt(s_usb_raw_label, "USB_DETE GPIO%d=%d (LOW=USB)",
+                          PIN_USB_VBUS, gpio_get_level(PIN_USB_VBUS));
 }
 
 static void ui_init(void)
@@ -361,7 +272,7 @@ static void ui_init(void)
     lv_obj_set_style_text_font(s_usb_raw_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(s_usb_raw_label, lv_color_hex(0x888888), 0);
     lv_obj_set_pos(s_usb_raw_label, 12, 38);
-    lv_label_set_text(s_usb_raw_label, "GPIO3=?");
+    lv_label_set_text(s_usb_raw_label, "USB_DETE=?");
 
     s_log_label = lv_label_create(scr);
     lv_obj_set_style_text_font(s_log_label, &lv_font_montserrat_14, 0);
@@ -485,7 +396,7 @@ static void btn_init(void)
     };
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    /* 耳机插入检测 (AMP_EN=GPIO18)：双边沿 + 悬空（板子自带上下拉，ESP32 别抢） */
+    /* 耳机插入检测 (AMP_EN=GPIO14)：双边沿 + 悬空（板子自带上下拉，ESP32 别抢） */
     gpio_config_t hp_conf = {
         .intr_type    = GPIO_INTR_ANYEDGE,
         .mode         = GPIO_MODE_INPUT,
@@ -504,7 +415,7 @@ static void btn_init(void)
 
     xTaskCreate(btn_task, "btn_task", 4096, NULL, 10, NULL);
 
-    ESP_LOGI(TAG, "Buttons ready — Vol-:IO6, Vol+:IO17, Stop:IO7, OnOff:IO5, HP:IO18");
+    ESP_LOGI(TAG, "Buttons ready — Vol-:IO6, Vol+:IO4, Stop:IO7, OnOff:IO5, HP:IO14");
 }
 
 /* ========================================================================
@@ -529,14 +440,13 @@ void app_main(void)
     gpio_set_level(PIN_LCD_POWER, 1);
     gpio_set_level(PIN_BACKLIGHT, 1);
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_LOGI(TAG, "HW: EN_POWER(46)=H LCD_POWER(43)=H BL(12)=H");
+    ESP_LOGI(TAG, "HW: EN_POWER(46)=H LCD_POWER(21)=H BL(39)=H");
 
     hw_reset();
     display_init();
     lvgl_init();
     ui_init();
     usb_vbus_init();
-    adc_vbus_init();
 
     btn_init();
     xTaskCreate(usb_monitor_task, "usb_monitor", 4096, NULL, 10, NULL);

@@ -1,32 +1,5 @@
-/*
- * Leisound V1 — Display + Touch Combined Test (ESP-IDF)
- *
- * === Leisound V1 针脚定义 (参考 boards/espressif/leisound_v1 GT911) ===
- *
- *   信号     | GPIO | 说明
- *   ---------|------|----------------------------------
- *   EN_POWER |  46  | 全板外设电源使能 (HIGH=ON)
- *   SPI SCK  |  12  | SPI2 时钟 (LCD)
- *   SPI MOSI |  11  | SPI2 主机输出 (LCD)
- *   SPI MISO |  13  | SPI2 主机输入 (LCD 不需要)
- *   LCD CS   |  10  | 屏幕片选 (LOW 有效)
- *   LCD DC   |  45  | 数据/命令选择
- *   LCD RST  |   8  | LCD 硬件复位 (与触摸共用)
- *   I2C SDA  |  47  | I2C0 数据 (GT911)
- *   I2C SCL  |  48  | I2C0 时钟 (GT911)
- *   TP INT   |  18  | 触摸中断 (GT911, active high)
- *   TP RST   |   8  | 触摸复位 (与 LCD RST 共用)
- *
- * 屏幕: ST7789V, 240x320, RGB565, 4-Wire SPI @ 20MHz
- * 触摸: GT911 (Goodix), I2C addr 0x14 / 0x5D
- *
- * 测试流程:
- *   1. 上电 + 复位 (LCD + Touch 共用 GPIO8)
- *   2. 初始化 SPI 总线 + ST7789V 屏幕
- *   3. 初始化 I2C 总线 + 扫描/识别 GT911
- *   4. 显示 UI 框架 + 实时触摸点可视化
- *   5. 轮询触摸数据, 在屏幕上画点和坐标
- */
+#include "nomadcast.h"
+/* PCB V1.2 wiring: nomadcast.h. Legacy GT911 protocol test; use t_touch_CST726 for CST726. */
 
 #include <stdio.h>
 #include <string.h>
@@ -49,24 +22,24 @@ static const char *TAG = "t_disp_touch";
  * ======================================================================== */
 
 /* Power */
-#define PIN_LCD_POWER  GPIO_NUM_43
-#define PIN_BACKLIGHT  GPIO_NUM_12
+#define PIN_LCD_POWER NOMADCAST_PIN_LCD_POWER
+#define PIN_BACKLIGHT NOMADCAST_PIN_LCD_BL
 
-#define PIN_LCD_INT    GPIO_NUM_39
-#define PIN_LCD_CS     GPIO_NUM_48
-#define PIN_LCD_DC     GPIO_NUM_47
-#define PIN_LCD_RST    GPIO_NUM_40
+#define PIN_LCD_INT NOMADCAST_PIN_LCD_INT
+#define PIN_LCD_CS NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST NOMADCAST_PIN_LCD_RST
 
 /* SPI2 pins */
-#define PIN_SPI_SCK    GPIO_NUM_21
-#define PIN_SPI_MOSI   GPIO_NUM_14
-#define PIN_SPI_MISO   GPIO_NUM_13
+#define PIN_SPI_SCK NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO NOMADCAST_PIN_SPI_MISO
 
 /* I2C0 — Touch */
-#define PIN_I2C_SDA     GPIO_NUM_38
-#define PIN_I2C_SCL     GPIO_NUM_45
-#define PIN_TP_INT      GPIO_NUM_39
-#define PIN_TP_RST      GPIO_NUM_40    /* 与 LCD RST 共用 */
+#define PIN_I2C_SDA NOMADCAST_PIN_I2C_SDA
+#define PIN_I2C_SCL NOMADCAST_PIN_I2C_SCL
+#define PIN_TP_INT NOMADCAST_PIN_TP_INT
+#define PIN_TP_RST NOMADCAST_PIN_TP_RST
 
 /* ========================================================================
  * Display Constants
@@ -333,11 +306,12 @@ static void board_power_on(void)
 {
     ESP_LOGI(TAG, "--- Board Power Init ---");
     gpio_config_t cfg = {
-        .pin_bit_mask = BIT64(PIN_LCD_POWER),
+        .pin_bit_mask = BIT64(PIN_LCD_POWER) | BIT64(NOMADCAST_PIN_AP_POWER),
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&cfg);
     gpio_set_level(PIN_LCD_POWER, 1);
+    gpio_set_level(NOMADCAST_PIN_AP_POWER, 1);
     ESP_LOGI(TAG, "  LCD_POWER (GPIO%d) -> HIGH", PIN_LCD_POWER);
     vTaskDelay(pdMS_TO_TICKS(100));
 }

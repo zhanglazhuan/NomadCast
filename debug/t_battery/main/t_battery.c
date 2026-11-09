@@ -1,10 +1,6 @@
-/*
- * NomadCast — t_battery: battery presence / voltage / charge test (Leisound V1)
- *
- *   CHAG   = GPIO4   charge status (LOW=charging, HIGH=not) — input + pull-up
- *   BAT_M  = GPIO8   battery voltage sense → ADC1_CH7, x2 divider
- *
- * present/full are best-effort heuristics (only these two pins are available).
+#include "nomadcast.h"
+/* PCB V1.2 battery test: CHAG=GPIO8, BAT_M=GPIO3 / ADC1_CH2.
+ * Presence/full indications remain voltage-based heuristics.
  */
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -18,18 +14,16 @@
 
 static const char *TAG = "t_battery";
 
-#define PIN_CHAG        GPIO_NUM_4          /* charge status: LOW=charging */
-#define PIN_BAT_M       GPIO_NUM_8          /* battery measure (ADC1_CH7), x2 divider */
-#define BAT_ADC_UNIT    ADC_UNIT_1
-#define BAT_ADC_CHANNEL ADC_CHANNEL_7        /* GPIO8 on ESP32-S3 */
-#define BAT_DIVIDER     2                    /* on-board resistor divider */
+#define PIN_CHAG NOMADCAST_BAT_CHG_PIN
+#define PIN_BAT_M NOMADCAST_PIN_BAT_ADC
+#define BAT_ADC_UNIT NOMADCAST_BAT_ADC_UNIT
+#define BAT_ADC_CHANNEL NOMADCAST_BAT_ADC_CHANNEL
+#define BAT_DIVIDER NOMADCAST_BAT_DIVIDER
 #define BAT_SAMPLES     16
 #define BAT_PRESENT_MV  2800                 /* real V above this => battery present */
 #define BAT_FULL_MV     4150                 /* not charging & >= this => full */
 
-/* If BT_M reads ~0V, the divider may be gated behind peripheral power EN_PWR
- * (GPIO46). To try it: add `#define PIN_EN_PWR GPIO_NUM_46`, configure it as
- * output and drive high in app_main before adc_init(). Off by default. */
+
 
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t          s_cali;
@@ -98,8 +92,8 @@ static void gpio_init(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== t_battery: Leisound V1 battery test ===");
-    ESP_LOGI(TAG, "CHAG=GPIO4 (LOW=charging)  BAT_M=GPIO8=ADC1_CH7 (x2 divider)");
+    ESP_LOGI(TAG, "=== t_battery: PCB V1.2 battery test ===");
+    ESP_LOGI(TAG, "CHAG=GPIO%d (LOW=charging) BAT_M=GPIO%d ADC channel=%d (x%d divider)", PIN_CHAG, PIN_BAT_M, BAT_ADC_CHANNEL, BAT_DIVIDER);
     ESP_LOGI(TAG, "present/full are best-effort (only CHAG + BT_M available)");
 
     gpio_init();

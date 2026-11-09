@@ -283,6 +283,11 @@ enum {
     STR_WEATHER_ERR_TIMEOUT,
     STR_WEATHER_ERR_SERVER,
 
+
+    STR_USB_DISK,
+    STR_USB_HINT,
+    STR_USB_FAILED,
+    STR_USB_SWITCHING,
     /* Settings — General (country/region) */
     STR_COUNTRY_REGION,
 

@@ -61,7 +61,7 @@ void log_system_init(void)
     ensure_log_dir();
     purge_old_sessions();
 
-    s_log.ring_mutex = xSemaphoreCreateMutex();
+    if (!s_log.ring_mutex) s_log.ring_mutex = xSemaphoreCreateMutex();
     if (!s_log.ring_mutex) {
         ESP_LOGE(TAG, "failed to create ring mutex");
         return;
@@ -118,12 +118,11 @@ void log_system_shutdown(void)
 
     /* Flush remaining buffer */
     flush_ring();
+    /* A timer callback may already be waiting on the mutex. Keep the mutex
+     * alive across sessions and serialize closing with that callback. */
+    xSemaphoreTake(s_log.ring_mutex, portMAX_DELAY);
     close_session();
-
-    if (s_log.ring_mutex) {
-        vSemaphoreDelete(s_log.ring_mutex);
-        s_log.ring_mutex = NULL;
-    }
+    xSemaphoreGive(s_log.ring_mutex);
 
     ESP_LOGI(TAG, "session ended (%lu lines, %lu bytes)",
              (unsigned long)s_log.line_count, (unsigned long)s_log.session_bytes);
@@ -260,10 +259,12 @@ static void close_session(void)
 
 static void flush_ring(void)
 {
-    if (!s_log.session_file) return;
-    if (s_log.ring_count == 0) return;
-
+    if (!s_log.ring_mutex) return;
     if (xSemaphoreTake(s_log.ring_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return;
+    if (!s_log.session_file || s_log.ring_count == 0) {
+        xSemaphoreGive(s_log.ring_mutex);
+        return;
+    }
 
     int count = s_log.ring_count;
     int start = (s_log.ring_head - count + RING_LINES) % RING_LINES;

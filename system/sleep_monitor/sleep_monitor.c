@@ -3,7 +3,7 @@
  */
 
 #include "sleep_monitor.h"
-#include "esp_lcd_panel_ops.h"
+#include "display_controller.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_sleep.h"
@@ -16,7 +16,6 @@ static const char *TAG = "sleep";
 /* ── State ────────────────────────────────────────────────────────────────── */
 
 typedef struct {
-    esp_lcd_panel_handle_t panel;
     lv_indev_t *touch_indev;
     lv_timer_t *idle_timer;
     int timeout_min;
@@ -24,7 +23,6 @@ typedef struct {
     bool is_sleeping;
     uint64_t last_activity_ms;
     gpio_num_t power_pin;
-    gpio_num_t backlight_pin;
     sleep_monitor_wake_cb_t wake_cb;
     sleep_monitor_pre_sleep_cb_t pre_sleep_cb;
     sleep_monitor_power_off_check_t power_off_check;
@@ -33,7 +31,6 @@ typedef struct {
 
 static sleep_monitor_state_t s_sleep = {
     .power_pin = GPIO_NUM_NC,
-    .backlight_pin = GPIO_NUM_NC,
 };
 
 /* ── Forward declarations ─────────────────────────────────────────────────── */
@@ -82,15 +79,16 @@ static void enter_sleep(void)
     ESP_LOGI(TAG, "Manual sleep via power key");
 
     /* 1. Blank the display */
-    esp_lcd_panel_disp_on_off(s_sleep.panel, false);
+    esp_err_t err = display_controller_sleep();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Display sleep failed: %s", esp_err_to_name(err));
+        return;
+    }
 
     /* 2. Disable touch */
     if (s_sleep.touch_indev) {
         lv_indev_enable(s_sleep.touch_indev, false);
     }
-
-    /* 3. Turn off the backlight for a truly dark screen (not just dim). */
-    if (s_sleep.backlight_pin != GPIO_NUM_NC) gpio_set_level(s_sleep.backlight_pin, 0);
 
     s_sleep.is_sleeping = true;
 }
@@ -129,14 +127,13 @@ static void idle_timer_cb(lv_timer_t *timer)
 static void wake_from_sleep(void)
 {
     if (!s_sleep.is_sleeping) return;
+    esp_err_t err = display_controller_wake();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Display wake failed: %s", esp_err_to_name(err));
+        return;
+    }
     s_sleep.is_sleeping = false;
     ESP_LOGI(TAG, "Waking from sleep");
-
-    if (s_sleep.backlight_pin != GPIO_NUM_NC) {
-        gpio_set_level(s_sleep.backlight_pin, 1);
-    }
-
-    esp_lcd_panel_disp_on_off(s_sleep.panel, true);
 
     if (s_sleep.touch_indev) {
         lv_indev_enable(s_sleep.touch_indev, true);
@@ -151,7 +148,7 @@ void sleep_monitor_init(esp_lcd_panel_handle_t panel,
                         lv_indev_t             *touch_indev,
                         int                     timeout_min)
 {
-    s_sleep.panel       = panel;
+    (void)panel; /* Display lifecycle belongs to display_controller. */
     s_sleep.touch_indev = touch_indev;
     s_sleep.timeout_min = timeout_min;
     s_sleep.is_sleeping = false;
@@ -241,14 +238,10 @@ void sleep_monitor_set_power_pin(gpio_num_t pin)
 
 void sleep_monitor_set_backlight_pin(gpio_num_t pin)
 {
-    s_sleep.backlight_pin = pin;
-    gpio_config_t cfg = {
-        .pin_bit_mask = BIT64(pin),
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    gpio_config(&cfg);
-    gpio_set_level(pin, 1);  /* default: backlight ON */
-    ESP_LOGI(TAG, "Backlight pin GPIO%d configured", pin);
+    esp_err_t err = display_controller_set_backlight_pin(pin);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Backlight configuration failed: %s", esp_err_to_name(err));
+    }
 }
 
 void sleep_monitor_set_wake_callback(sleep_monitor_wake_cb_t cb)

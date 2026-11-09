@@ -1,3 +1,4 @@
+#include "nomadcast.h"
 // SPDX-License-Identifier: MIT
 // Leisound V1 Board Hardware Abstraction — Pin Map & Init API
 #pragma once
@@ -19,29 +20,29 @@ extern "C" {
  * ======================================================================== */
 
 /* ---- Power ---- */
-#define BOARD_PIN_EN_POWER   GPIO_NUM_46   // 全板外设电源 (OUT, HIGH=ON)
-#define BOARD_PIN_AP_EN      GPIO_NUM_21   // HT6872 功放使能 (OUT, HIGH=ON)
-#define BOARD_PIN_AMP_DET    GPIO_NUM_43   // 耳机检测 (IN, HIGH=插入)
+#define BOARD_PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define BOARD_PIN_AP_EN NOMADCAST_PIN_AMP_EN
+#define BOARD_PIN_AMP_DET NOMADCAST_PIN_HP_DETECT
 
 /* ---- I2C (共用总线) ---- */
-#define BOARD_PIN_I2C_SDA    GPIO_NUM_47
-#define BOARD_PIN_I2C_SCL    GPIO_NUM_48
+#define BOARD_PIN_I2C_SDA NOMADCAST_PIN_I2C_SDA
+#define BOARD_PIN_I2C_SCL NOMADCAST_PIN_I2C_SCL
 #define BOARD_I2C_FREQ_HZ    400000
 
 /* ---- I2S ---- */
-#define BOARD_PIN_I2S_BCLK   GPIO_NUM_5
-#define BOARD_PIN_I2S_LRCLK  GPIO_NUM_6
-#define BOARD_PIN_I2S_DOUT   GPIO_NUM_7
+#define BOARD_PIN_I2S_BCLK NOMADCAST_PIN_I2S_BCLK
+#define BOARD_PIN_I2S_LRCLK NOMADCAST_PIN_I2S_WS
+#define BOARD_PIN_I2S_DOUT NOMADCAST_PIN_I2S_DOUT
 #define BOARD_I2S_PORT       I2S_NUM_0
 
 /* ---- SDMMC (1-bit mode) ---- */
-#define BOARD_PIN_SD_CLK     GPIO_NUM_1
-#define BOARD_PIN_SD_CMD     GPIO_NUM_14
-#define BOARD_PIN_SD_D0      GPIO_NUM_2
+#define BOARD_PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define BOARD_PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define BOARD_PIN_SD_D0 NOMADCAST_PIN_SD_DAT0
 #define BOARD_SD_MOUNT_POINT "/sdcard"
 
 /* ---- ES8156 ---- */
-#define BOARD_ES8156_I2C_ADDR 0x08
+#define BOARD_ES8156_I2C_ADDR NOMADCAST_ES8156_ADDR
 
 /* ========================================================================
  * Public API

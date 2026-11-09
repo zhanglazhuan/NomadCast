@@ -274,6 +274,10 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "证书校验失败(时间未同步)",
     "请求超时",
     "服务器错误",
+    "U 盘模式",
+    "开启后暂停播放和下载。关闭前请在电脑上安全弹出 U 盘。",
+    "U 盘模式切换失败，请重试",
+    "正在切换，请稍候…",
 
     /* Settings — General (country/region) */
     "所在国家",

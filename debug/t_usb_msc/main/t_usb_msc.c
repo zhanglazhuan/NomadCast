@@ -1,3 +1,4 @@
+#include "nomadcast.h"
 /*
  * NomadCast — SD Card → USB Mass Storage Device (MSC) Test
  *
@@ -6,9 +7,9 @@
  *
  * Pins (Leisound V1.1):
  *   EN_POWER = GPIO46   board power
- *   SD CLK   = GPIO10
- *   SD CMD   = GPIO11
- *   SD D0    = GPIO9
+ *   SD CLK   = GPIO2
+ *   SD CMD   = GPIO40
+ *   SD D0    = GPIO1
  */
 
 #include <stdio.h>
@@ -26,10 +27,10 @@
 
 static const char *TAG = "t_usb_msc";
 
-#define PIN_EN_POWER    GPIO_NUM_46
-#define PIN_SD_CLK      GPIO_NUM_10
-#define PIN_SD_CMD      GPIO_NUM_11
-#define PIN_SD_D0       GPIO_NUM_9
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define PIN_SD_D0 NOMADCAST_PIN_SD_DAT0
 
 /* ---- TinyUSB MSC descriptors ---- */
 #define EPNUM_MSC           1

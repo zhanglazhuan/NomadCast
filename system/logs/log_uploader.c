@@ -46,6 +46,7 @@ typedef enum {
 
 typedef struct {
     QueueHandle_t upload_queue;
+    volatile bool paused;
     char missing_sessions[MISSING_SESSION_CACHE][64];
     size_t missing_count;
 } log_uploader_state_t;
@@ -361,6 +362,7 @@ static void uploader_task(void *arg)
 
         /* Process one session at a time, with yield between chunks */
         while (1) {
+            if (s_uploader.paused) break;
             char *session = find_pending_session();
             if (!session) {
                 ESP_LOGI(TAG, "no pending sessions to upload");
@@ -461,6 +463,7 @@ static void uploader_task(void *arg)
 
 void log_uploader_start(void)
 {
+    if (s_uploader.upload_queue) return;
     s_uploader.upload_queue = xQueueCreate(4, sizeof(upload_cmd_t));
     if (!s_uploader.upload_queue) {
         ESP_LOGE(TAG, "failed to create upload queue");
@@ -478,4 +481,9 @@ void log_uploader_on_wifi_connected(void)
     if (!s_uploader.upload_queue) return;
     upload_cmd_t cmd = UPLOAD_CMD_WIFI_CONNECTED;
     xQueueSend(s_uploader.upload_queue, &cmd, 0);  /* non-blocking */
+}
+
+void log_uploader_pause(bool paused)
+{
+    s_uploader.paused = paused;
 }
