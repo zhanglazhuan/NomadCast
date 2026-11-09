@@ -274,4 +274,8 @@ const char *const strings_en[STR_COUNT] = {
     "TLS verify failed (clock)",
     "Request timed out",
     "Server error",
+    "USB storage",
+    "Playback and downloads pause while enabled. Safely eject on the computer before switching off.",
+    "Storage switch failed. Please retry.",
+    "Switching storage. Please wait...",
 };

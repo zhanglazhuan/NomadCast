@@ -14,6 +14,7 @@ managed_components/
 archive/
 docs/
 pc_demo/
+refer/
 
 # ── Server runtime directories ──
 server/archive/

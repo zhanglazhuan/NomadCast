@@ -89,6 +89,9 @@ typedef struct PodcastCtrlCtx {
     DownloadCtx dl;
 } PodcastCtrlCtx;
 
+static volatile bool s_storage_suspended;
+static bool s_downloads_were_paused;
+
 extern PodcastApp g_podcast_app;
 
 /* Helper: get ctx from app */
@@ -254,6 +257,7 @@ static void *psram_malloc(size_t sz) {
  * podcast_controller_init. */
 static bool ctl_auto_power_off_allowed(void)
 {
+    if (s_storage_suspended) return false;
     if (audio_player_is_playing()) return false;
 
     PodcastApp *app = &g_podcast_app;
@@ -264,6 +268,25 @@ static bool ctl_auto_power_off_allowed(void)
             return false;
     }
     return true;
+}
+
+/* USB ownership pauses workers without losing the user's download pause state. */
+
+void podcast_controller_suspend_storage(void)
+{
+    if (s_storage_suspended) return;
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    s_downloads_were_paused = ctx && ctx->dl.user_paused;
+    s_storage_suspended = true;
+    if (ctx) ctx->dl.user_paused = true;
+}
+
+void podcast_controller_restore_storage(void)
+{
+    PodcastCtrlCtx *ctx = ctl_ctx(&g_podcast_app);
+    if (ctx) ctx->dl.user_paused = s_downloads_were_paused;
+    s_storage_suspended = false;
+    if (ctx && ctx->dl.sem && !s_downloads_were_paused) xSemaphoreGive(ctx->dl.sem);
 }
 
 void podcast_controller_init(struct PodcastApp *app) {
@@ -688,7 +711,7 @@ static bool dl_progress_cb(int bytes_done, int total_bytes, int speed_bps)
     }
 
     if (!dl->running || dl->abort_current) return false;   /* stop/cancel */
-    if (dl->user_paused)   return false;   /* user pause — abort the in-flight transfer */
+    if (s_storage_suspended || dl->user_paused) return false;   /* user pause — abort the in-flight transfer */
     /* Playback no longer interrupts a download: the transfer's 8 KB buffer and
      * the esp_http_client buffer both live in PSRAM, so a playing track can keep
      * running concurrently without stealing the download's DRAM. */
@@ -762,7 +785,7 @@ static void dl_worker_task(void *arg)
             }
 
             /* User-requested pause — wait for resume signal */
-            if (ctx->dl.user_paused) {
+            if (s_storage_suspended || ctx->dl.user_paused) {
                 xSemaphoreTake(ctx->dl.sem, pdMS_TO_TICKS(2000));
                 continue;
             }
@@ -900,6 +923,7 @@ static void dl_worker_task(void *arg)
 void podcast_controller_resume_downloads(struct PodcastApp *app) { dl_resume_pending(app); }
 
 void podcast_controller_pause_all_downloads(struct PodcastApp *app) {
+    if (s_storage_suspended) s_downloads_were_paused = true;
     PodcastCtrlCtx *ctx = ctl_ctx(app);
     if (!ctx) return;
     ctx->dl.user_paused = true;
@@ -907,6 +931,7 @@ void podcast_controller_pause_all_downloads(struct PodcastApp *app) {
 }
 
 void podcast_controller_resume_all_downloads(struct PodcastApp *app) {
+    if (s_storage_suspended) { s_downloads_were_paused = false; return; }
     PodcastCtrlCtx *ctx = ctl_ctx(app);
     if (!ctx) return;
     ctx->dl.user_paused = false;
@@ -921,6 +946,7 @@ bool podcast_controller_is_download_paused(struct PodcastApp *app) {
 
 static void dl_resume_pending(PodcastApp *app)
 {
+    if (s_storage_suspended) return;
     if (!app || !app->model) return;
     PodcastModel *m = app->model;
     PodcastCtrlCtx *ctx = ctl_ctx(app);
@@ -1001,6 +1027,7 @@ int podcast_dl_bytes_per_audio_sec(void) {
 
 void controller_process_download(void)
 {
+    if (s_storage_suspended) return;
     PodcastApp *app = &g_podcast_app;
     PodcastCtrlCtx *ctx = ctl_ctx(app);
     if (!app || !app->model || !ctx) return;
@@ -1312,6 +1339,10 @@ bool podcast_controller_download_episode_ex(struct PodcastApp *app, const char *
 bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char *url,
     const char *title, const char *channel_title, int ch_id, int ep_id, int dur, int col_id)
 {
+    if (s_storage_suspended) {
+        lv_toast_show(tr(STR_USB_HINT), 3000);
+        return false;
+    }
     if (!url || !url[0] || !title) return false;
     PodcastCtrlCtx *ctx = ctl_ctx(app);
     if (!ctx) return false;

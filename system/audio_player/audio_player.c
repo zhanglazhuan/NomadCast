@@ -38,7 +38,7 @@
 #include "es8156.h"
 #include "app_event.h"
 #include "flash_store.h"
-#include "nomadcast_v1.h"
+#include "nomadcast.h"
 
 static const char *TAG = "audio_player";
 
@@ -52,11 +52,11 @@ void audio_player_log_memory(const char *where)
 
 #define log_memory audio_player_log_memory
 
-/* ── I2S pins (from nomadcast_v1.h) ───────────────────────────────────── */
+/* ── I2S pins (from nomadcast.h) ───────────────────────────────────── */
 #define I2S_BCLK  NOMADCAST_PIN_I2S_BCLK
 #define I2S_LRCLK NOMADCAST_PIN_I2S_WS
 #define I2S_DOUT  NOMADCAST_PIN_I2S_DOUT
-#define I2S_MCLK  NOMADCAST_PIN_I2S_MCLK   /* GPIO1 → ES8156 MCLK */
+#define I2S_MCLK  NOMADCAST_PIN_I2S_MCLK   /* GPIO13 → ES8156 MCLK */
 #define PIN_AP_EN NOMADCAST_PIN_AMP_EN  /* HT6872 amp enable */
 #define PIN_HP_DET NOMADCAST_PIN_HP_DETECT  /* headphone detect (HIGH=inserted) */
 
@@ -69,7 +69,7 @@ esp_err_t get_i2s_pins(int port, board_i2s_pin_t *cfg) {
     cfg->data_out_num = I2S_DOUT;
     cfg->data_in_num  = I2S_GPIO_UNUSED;
     /* ES8156 is a slave DAC that needs a master clock (Ratio=256). Drive it
-     * from the ESP32's I2S MCLK on GPIO1 — without it the DAC clock is
+     * from the ESP32's I2S MCLK on GPIO13 — without it the DAC clock is
      * unstable and produces crackle. */
     cfg->mck_io_num   = I2S_MCLK;
     return ESP_OK;

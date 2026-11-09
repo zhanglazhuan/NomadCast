@@ -1,17 +1,18 @@
+#include "nomadcast.h"
 /*
- * NomadCast — USB wakeup diagnostic (Leisound/NomadCast V1.1)
+ * NomadCast — USB wakeup diagnostic (Leisound/NomadCast V1.2)
  *
  * Signal under test:
- *   USB +5V -> R11/R14 divider -> D7 -> WAKEUP_MCU -> GPIO3/ADC1_CH2
+ *   USB +5V -> R11/R14 divider -> D7 -> WAKEUP_MCU -> GPIO9/ADC1_CH8
  *
  * Test modes selected at boot:
- *   Power key released: reproduce production firmware (GPIO3 pull-down ON)
- *   Power key held:     comparison test (GPIO3 pull-down OFF)
+ *   Power key released: reproduce production firmware (GPIO9 pull-down ON)
+ *   Power key held:     comparison test (GPIO9 pull-down OFF)
  *
  * Screen colors:
  *   BLUE    normal boot, production pull-down mode
  *   YELLOW  normal boot, no-pull comparison mode
- *   GREEN   woke from GPIO3 after USB insertion
+ *   GREEN   woke from GPIO9 after USB insertion
  *   MAGENTA woke manually from the power key (GPIO5)
  *   RED     invalid/false wake or wake configuration error
  */
@@ -43,21 +44,21 @@
 static const char *TAG = "t_wakeup";
 
 /* Wake inputs. */
-#define PIN_USB_WAKE       GPIO_NUM_3
-#define PIN_POWER_KEY      GPIO_NUM_5
+#define PIN_USB_WAKE NOMADCAST_PIN_USB_WAKEUP
+#define PIN_POWER_KEY NOMADCAST_PIN_KEY_POWER
 #define USB_ADC_UNIT       ADC_UNIT_1
-#define USB_ADC_CHANNEL    ADC_CHANNEL_2
+#define USB_ADC_CHANNEL    NOMADCAST_USB_WAKE_ADC_CHANNEL
 
-/* Display and board power pins from NomadCast V1.1. */
-#define PIN_AP_POWER       GPIO_NUM_46
-#define PIN_LCD_POWER      GPIO_NUM_43
-#define PIN_LCD_BACKLIGHT  GPIO_NUM_12
-#define PIN_LCD_CS         GPIO_NUM_48
-#define PIN_LCD_DC         GPIO_NUM_47
-#define PIN_LCD_RST        GPIO_NUM_40
-#define PIN_SPI_SCK        GPIO_NUM_21
-#define PIN_SPI_MOSI       GPIO_NUM_14
-#define PIN_SPI_MISO       GPIO_NUM_13
+/* Display and board power pins from NomadCast V1.2. */
+#define PIN_AP_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_LCD_POWER NOMADCAST_PIN_LCD_POWER
+#define PIN_LCD_BACKLIGHT NOMADCAST_PIN_LCD_BL
+#define PIN_LCD_CS NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST NOMADCAST_PIN_LCD_RST
+#define PIN_SPI_SCK NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO NOMADCAST_PIN_SPI_MISO
 
 #define LCD_HOST           SPI2_HOST
 #define LCD_WIDTH          240
@@ -312,7 +313,7 @@ static void log_sample_pair(const usb_sample_t *no_pull,
                             const usb_sample_t *pull_down)
 {
     ESP_LOGI(TAG,
-             "GPIO3  NO_PULL: %s n=%2d raw=%4d %4dmV D=%d | "
+             "GPIO9  NO_PULL: %s n=%2d raw=%4d %4dmV D=%d | "
              "PULLDOWN: %s n=%2d raw=%4d %4dmV D=%d%s",
              no_pull->valid ? "OK " : "BAD", no_pull->valid_samples,
              no_pull->raw, no_pull->millivolts, no_pull->digital_level,
@@ -352,7 +353,7 @@ static void wait_until_usb_is_unplugged(void)
     int sample_count = 0;
     int low_streak = 0;
 
-    ESP_LOGI(TAG, "Observe both GPIO3 readings, then UNPLUG the USB cable");
+    ESP_LOGI(TAG, "Observe both GPIO9 readings, then UNPLUG the USB cable");
     ESP_LOGI(TAG, "The serial monitor will disconnect; battery must remain connected");
 
     while (true) {
@@ -394,7 +395,7 @@ static esp_err_t enter_deep_sleep(wake_mode_t mode)
     vTaskDelay(pdMS_TO_TICKS(100));
 
     if (gpio_get_level(PIN_USB_WAKE) != 0) {
-        ESP_LOGE(TAG, "GPIO3 is already HIGH with USB absent (%s mode); refusing sleep",
+        ESP_LOGE(TAG, "GPIO9 is already HIGH with USB absent (%s mode); refusing sleep",
                  use_pull_down ? "PULLDOWN" : "NO_PULL");
         return ESP_ERR_INVALID_STATE;
     }
@@ -410,7 +411,7 @@ static esp_err_t enter_deep_sleep(wake_mode_t mode)
 
     err = rtc_gpio_pullup_dis(PIN_USB_WAKE);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot disable GPIO3 RTC pull-up: %s",
+        ESP_LOGE(TAG, "Cannot disable GPIO9 RTC pull-up: %s",
                  esp_err_to_name(err));
         return err;
     }
@@ -420,7 +421,7 @@ static esp_err_t enter_deep_sleep(wake_mode_t mode)
         err = rtc_gpio_pulldown_dis(PIN_USB_WAKE);
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Cannot configure GPIO3 RTC pull-down: %s",
+        ESP_LOGE(TAG, "Cannot configure GPIO9 RTC pull-down: %s",
                  esp_err_to_name(err));
         return err;
     }
@@ -446,9 +447,9 @@ static esp_err_t enter_deep_sleep(wake_mode_t mode)
 
     adc_deinit();
 
-    ESP_LOGI(TAG, "Entering deep sleep: GPIO3 USB wake, GPIO5 rescue, mode=%s",
+    ESP_LOGI(TAG, "Entering deep sleep: GPIO9 USB wake, GPIO5 rescue, mode=%s",
              wake_mode_name(mode));
-    ESP_LOGI(TAG, "Now plug the USB cable in; GREEN screen means GPIO3 woke the MCU");
+    ESP_LOGI(TAG, "Now plug the USB cable in; GREEN screen means GPIO9 woke the MCU");
     vTaskDelay(pdMS_TO_TICKS(250));
     display_off();
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -492,7 +493,7 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "====================================================");
-    ESP_LOGI(TAG, "NomadCast GPIO3 USB wakeup diagnostic");
+    ESP_LOGI(TAG, "NomadCast GPIO9 USB wakeup diagnostic");
     ESP_LOGI(TAG, "wake_cause=%d ext1_status=0x%llx mode=%s",
              (int)wake_cause, (unsigned long long)ext1_status,
              wake_mode_name(mode));
@@ -512,7 +513,7 @@ void app_main(void)
             monitor_forever();
         }
         if (!usb_signal_is_present(&no_pull)) {
-            ESP_LOGE(TAG, "GPIO3 caused EXT1 wake, but USB voltage is absent: false/floating wake");
+            ESP_LOGE(TAG, "GPIO9 caused EXT1 wake, but USB voltage is absent: false/floating wake");
             display_fill(255, 0, 0);   /* RED */
             monitor_forever();
         }
@@ -521,11 +522,11 @@ void app_main(void)
              * USB drive level from a floating/noisy level. The user's cable
              * insertion timing is the independent evidence for this trial. */
             ESP_LOGW(TAG,
-                     "RESULT: GPIO3 caused EXT1 and is HIGH in NO_PULL mode; "
+                     "RESULT: GPIO9 caused EXT1 and is HIGH in NO_PULL mode; "
                      "confirm it followed the USB insertion (floating cannot be excluded)");
         } else {
             ESP_LOGI(TAG,
-                     "PASS: GPIO3 caused EXT1 and wake voltage is present; tested mode=%s",
+                     "PASS: GPIO9 caused EXT1 and wake voltage is present; tested mode=%s",
                      wake_mode_name(mode));
         }
     } else if (woke_by_key) {

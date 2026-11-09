@@ -1,138 +1,105 @@
-/*
- * NomadCast — Speaker + Earphone Plug Detection Test
- *
- * Starts playing an 800 Hz beep through the speaker. When earphones are
- * inserted (AMP_EN=GPIO43 goes HIGH), immediately disables the speaker amp
- * (AP_EN=GPIO21 → LOW) so audio routes through the earphone path.
- * Re-enables the speaker when earphones are removed.
- *
- * === Leisound V1 Pins ===
- *   EN_PWR   = GPIO46   全板外设电源
- *   AP_EN    = GPIO21   HT6872 功放使能 (HIGH=speaker on, LOW=earphone)
- *   AMP_EN   = GPIO43   耳机检测 (输入, HIGH=已插入)
- *   I2S BCLK = GPIO5
- *   I2S LRCLK= GPIO6
- *   I2S DOUT = GPIO7
- */
-
-#include <stdio.h>
+/* PCB V1.2: ES7111 I2S DAC -> HT6872 speaker amplifier.
+ * The ES8156 headphone DAC is not initialized by this speaker test. */
 #include <math.h>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/timers.h"
-
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "nomadcast.h"
 
 static const char *TAG = "beep";
-
-#define PIN_EN_POWER    GPIO_NUM_46
-#define PIN_AP_EN       GPIO_NUM_44
-#define PIN_AMP_EN      GPIO_NUM_11
-
-#define PIN_I2S_MCLK    GPIO_NUM_1
-#define PIN_I2S_BCLK    GPIO_NUM_2
-#define PIN_I2S_LRCLK   GPIO_NUM_41
-#define PIN_I2S_DOUT    GPIO_NUM_42
-
-#define SAMPLE_RATE     44100
-#define BEEP_FREQ       800
-#define AMPLITUDE       8000
-
+#define SAMPLE_RATE 44100
+#define BEEP_FREQ 800
+#define AMPLITUDE 8000
+#define FRAMES 256
 static i2s_chan_handle_t i2s_tx;
 
-static void i2s_init(void)
+static void write_audio(const int16_t *buffer, size_t size)
 {
-    ESP_LOGI(TAG, "Init I2S0: BCLK=%d LRCLK=%d DOUT=%d rate=%d",
-             PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DOUT, SAMPLE_RATE);
-
-    i2s_chan_config_t ch = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ch.auto_clear = true;
-    ESP_ERROR_CHECK(i2s_new_channel(&ch, &i2s_tx, NULL));
-
-    i2s_std_config_t sc = {
-        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
-                                                         I2S_SLOT_MODE_STEREO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = PIN_I2S_BCLK,
-            .ws   = PIN_I2S_LRCLK,
-            .dout = PIN_I2S_DOUT,
-            .din  = I2S_GPIO_UNUSED,
-        },
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(i2s_tx, &sc));
-    ESP_ERROR_CHECK(i2s_channel_enable(i2s_tx));
-
-    /* Preload silence to start the I2S clock */
-    int16_t sil[256] = {0};
-    size_t bw;
-    i2s_channel_write(i2s_tx, sil, sizeof(sil), &bw, portMAX_DELAY);
-    ESP_LOGI(TAG, "I2S0 ready");
-}
-
-/* Hardware discovery: try every GPIO that could be a jack-detect pin.
- * After 5 seconds the speaker mutes (AP_EN=0) so you can check if the earphone
- * works when the amp is off — this proves the audio path is functional. */
-static void hw_discovery(void *arg) {
-    ESP_LOGW(TAG, "≈≈≈ SPEAKER OFF — is earphone playing? ≈≈≈");
-    gpio_set_level(PIN_AP_EN, 0);  /* mute speaker amp */
+    size_t written = 0;
+    ESP_ERROR_CHECK(i2s_channel_write(i2s_tx, buffer, size, &written, 1000));
+    ESP_ERROR_CHECK(written == size ? ESP_OK : ESP_FAIL);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== Speaker + Earphone Plug Test ===");
-
-    /* Power */
-    gpio_set_direction(PIN_EN_POWER, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_EN_POWER, 1);
-
-    /* Speaker amp (GPIO21) — output, start ON */
-    gpio_set_direction(PIN_AP_EN, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_AP_EN, 1);
-
-    /* AMP_EN (GPIO43) — schematic shows it's HT6872 SHDN pin, NOT a jack-detect.
-     * The earphone jack on this board likely has NO MCU-connected detection pin.
-     * Read it as a data point, but don't expect it to change on plug/unplug. */
-    gpio_set_direction(PIN_AMP_EN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(PIN_AMP_EN, GPIO_PULLDOWN_ONLY);
-
+    ESP_LOGI(TAG, "=== Speaker test / PCB V1.2 / ES7111 + HT6872 ===");
+    gpio_config_t outputs = {
+        .pin_bit_mask = (1ULL << NOMADCAST_PIN_AP_POWER) | (1ULL << NOMADCAST_PIN_AMP_EN),
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&outputs));
+    ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_AMP_EN, 0));
+    ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_AP_POWER, 1));
+    gpio_config_t detect = {
+        .pin_bit_mask = 1ULL << NOMADCAST_PIN_HP_DETECT,
+        .mode = GPIO_MODE_INPUT,
+        /* Use the external jack detection resistor network. */
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&detect));
     vTaskDelay(pdMS_TO_TICKS(200));
-    ESP_LOGI(TAG, "HW: EN_POWER=1 AP_EN=1 AMP_EN=%d", gpio_get_level(PIN_AMP_EN));
 
-    /* I2S */
-    i2s_init();
-
-    /* After 5s of speaker beep, mute the amp. Plug in earphones to verify
-     * the DAC→headphone path works when the speaker amp is off. */
-    const esp_timer_create_args_t timer_args = { .callback = hw_discovery };
-    esp_timer_handle_t hp_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &hp_timer));
-    ESP_ERROR_CHECK(esp_timer_start_once(hp_timer, 5 * 1000 * 1000));
-
-    /* Sine LUT */
-    #define PERIOD_SAMPLES  (SAMPLE_RATE / BEEP_FREQ)
-    int16_t buf[PERIOD_SAMPLES * 2];
-    for (int i = 0; i < PERIOD_SAMPLES; i++) {
-        int16_t s = (int16_t)(AMPLITUDE * sin(2.0 * M_PI * i / PERIOD_SAMPLES));
-        buf[i * 2]     = s;
-        buf[i * 2 + 1] = s;
-    }
-
-    ESP_LOGI(TAG, "=== Beeping %d Hz — insert earphone to switch ===", BEEP_FREQ);
-
-    int loop = 0;
+    ESP_LOGI(TAG, "I2S0: BCLK=%d LRCLK=%d DOUT=%d rate=%d; ES7111 needs no MCLK",
+             NOMADCAST_PIN_I2S_BCLK, NOMADCAST_PIN_I2S_WS,
+             NOMADCAST_PIN_I2S_DOUT, SAMPLE_RATE);
+    i2s_chan_config_t channel = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    channel.auto_clear = true;
+    ESP_ERROR_CHECK(i2s_new_channel(&channel, &i2s_tx, NULL));
+    i2s_std_config_t config = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = NOMADCAST_PIN_I2S_BCLK,
+            .ws = NOMADCAST_PIN_I2S_WS,
+            .dout = NOMADCAST_PIN_I2S_DOUT,
+            .din = I2S_GPIO_UNUSED,
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(i2s_tx, &config));
+    ESP_ERROR_CHECK(i2s_channel_enable(i2s_tx));
+    int16_t buffer[FRAMES * 2] = {0};
+    write_audio(buffer, sizeof(buffer));
+    int plugged = gpio_get_level(NOMADCAST_PIN_HP_DETECT);
+    int candidate = plugged;
+    int64_t candidate_since = esp_timer_get_time();
+    ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_AMP_EN, !plugged));
+    ESP_LOGI(TAG, "800 Hz continuous tone; jack GPIO%d HIGH mutes speaker. Headphone DAC not initialized.",
+             NOMADCAST_PIN_HP_DETECT);
+    double phase = 0;
+    int64_t next_status = 0;
+    uint32_t blocks = 0;
     while (1) {
-        size_t bw;
-        i2s_channel_write(i2s_tx, buf, sizeof(buf), &bw, portMAX_DELAY);
-        if (++loop % 200 == 0) ESP_LOGI(TAG, "Beep loop %d, AMP_EN=%d AP_EN=%d",
-                                        loop, gpio_get_level(PIN_AMP_EN),
-                                        gpio_get_level(PIN_AP_EN));
+        for (int i = 0; i < FRAMES; ++i) {
+            int16_t sample = (int16_t)(AMPLITUDE * sin(phase));
+            buffer[2 * i] = buffer[2 * i + 1] = sample;
+            phase += 2.0 * M_PI * BEEP_FREQ / SAMPLE_RATE;
+            if (phase >= 2.0 * M_PI) phase -= 2.0 * M_PI;
+        }
+        write_audio(buffer, sizeof(buffer));
+        ++blocks;
+        int64_t now = esp_timer_get_time();
+        int level = gpio_get_level(NOMADCAST_PIN_HP_DETECT);
+        if (level != candidate) {
+            candidate = level;
+            candidate_since = now;
+        }
+        if (candidate != plugged && now - candidate_since >= 50000) {
+            plugged = candidate;
+            ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_AMP_EN, !plugged));
+            ESP_LOGI(TAG, "Jack %s; speaker %s", plugged ? "inserted" : "removed", plugged ? "OFF" : "ON");
+        }
+        if (now >= next_status) {
+            ESP_LOGI(TAG, "TX blocks=%lu POWER(GPIO%d)=%d AP_EN(GPIO%d)=%d HP_DETECT(GPIO%d)=%d",
+                     (unsigned long)blocks, NOMADCAST_PIN_AP_POWER, gpio_get_level(NOMADCAST_PIN_AP_POWER),
+                     NOMADCAST_PIN_AMP_EN, gpio_get_level(NOMADCAST_PIN_AMP_EN),
+                     NOMADCAST_PIN_HP_DETECT, level);
+            next_status = now + 5000000;
+        }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Leisound V1 — Display + Touch Board HAL Implementation
+ * PCB V1.2 — Display + Touch Board HAL Implementation
  *
  * ST7789V (240x320 RGB565) via SPI2 @ 20MHz
  * GT911 via I2C0 @ 100kHz (manual driver, matching t_display_touch exactly)
@@ -72,11 +72,13 @@ esp_err_t board_ui_power_on(void)
 {
     ESP_LOGI(TAG, "Power ON: EN_POWER(GPIO%d)=1", BOARD_UI_PIN_EN_POWER);
     gpio_config_t cfg = {
-        .pin_bit_mask = BIT64(BOARD_UI_PIN_EN_POWER),
+        .pin_bit_mask = BIT64(BOARD_UI_PIN_EN_POWER) | BIT64(NOMADCAST_PIN_LCD_POWER) | BIT64(NOMADCAST_PIN_LCD_BL),
         .mode = GPIO_MODE_OUTPUT,
     };
     gpio_config(&cfg);
     gpio_set_level(BOARD_UI_PIN_EN_POWER, 1);
+    gpio_set_level(NOMADCAST_PIN_LCD_POWER, 1);
+    gpio_set_level(NOMADCAST_PIN_LCD_BL, 1);
     vTaskDelay(pdMS_TO_TICKS(100));
     return ESP_OK;
 }
@@ -84,7 +86,7 @@ esp_err_t board_ui_power_on(void)
 /* ========================================================================
  * Combined Hardware Reset — matches t_display_touch combined_hw_reset()
  *
- * Shared GPIO8: LCD RST + TP RST
+ * Shared GPIO43: LCD RST + TP RST
  * GT911 I2C address selection depends on INT level during RST rising edge:
  *   INT=LOW  → addr 0x5D/0xBA
  *   INT=HIGH → addr 0x14/0x28
@@ -93,7 +95,7 @@ esp_err_t board_ui_power_on(void)
 
 esp_err_t board_ui_hw_reset(void)
 {
-    ESP_LOGI(TAG, "--- Combined HW Reset (LCD + Touch, GPIO8) ---");
+    ESP_LOGI(TAG, "--- Combined HW Reset (LCD + Touch, GPIO43) ---");
 
     gpio_config_t out_cfg = {
         .pin_bit_mask = BIT64(BOARD_UI_PIN_TP_RST) | BIT64(BOARD_UI_PIN_TP_INT),

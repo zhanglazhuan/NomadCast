@@ -8,7 +8,7 @@
  * Injected globally via include_directories() in the root CMakeLists.txt
  * so all ADF components can find it.  No vendor/esp-adf/ files are touched.
  *
- * All pin values reference leisound_v1.h — the single source of truth.
+ * All pin values reference nomadcast.h — the single source of truth.
  */
 
 #ifndef _AUDIO_BOARD_H_
@@ -23,7 +23,7 @@
 
 #include "driver/gpio.h"
 #include "driver/i2s_common.h"
-#include "leisound_v1.h"
+#include "nomadcast.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,11 +46,11 @@ extern "C" {
 #define I2S_GPIO_UNUSED             GPIO_NUM_NC
 
 /* ══════════════════════════════════════════════════════════════════════════
- * Power amplifier (LEISOUND_PIN_AMP_EN from leisound_v1.h)
+ * Power amplifier (NOMADCAST_PIN_AMP_EN from nomadcast.h)
  * ══════════════════════════════════════════════════════════════════════════ */
 
 #define BOARD_PA_GAIN               (0)
-#define PA_ENABLE_GPIO              LEISOUND_PIN_AMP_EN
+#define PA_ENABLE_GPIO              NOMADCAST_PIN_AMP_EN
 #define HEADPHONE_DETECT            (-1)
 
 /* ══════════════════════════════════════════════════════════════════════════

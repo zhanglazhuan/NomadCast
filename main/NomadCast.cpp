@@ -1,8 +1,8 @@
 /*
  * NomadCast — Main Entry Point
  *
- * ESP32-S3 Leisound V1 board. Proven init sequence from t_ui:
- *   1. Power ON → HW reset → Display (ST7789) → Touch (GT911) → LVGL
+ * ESP32-S3 PCB V1.2 (V2 profile). Display settings verified in t_display:
+ *   1. Power ON → HW reset → Display (ST7789) → Touch (CST836U) → LVGL
  *   2. App manager + Settings app → Launcher home UI → Gesture hooks
  */
 
@@ -16,7 +16,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_st7789.h"
+#include "nomadcast_display.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
@@ -24,6 +24,8 @@
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
 #include "lvgl.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
+#include "src/misc/cache/instance/lv_image_header_cache.h"
 
 extern "C" {
 #include "app_manager.h"
@@ -42,11 +44,14 @@ extern "C" {
 #include "battery.h"
 #include "audio_player.h"
 #include "ota.h"
-#include "gt911.h"
-#include "nomadcast_v1.h"
+#include "touch_controller.h"
+#include "display_controller.h"
+#include "usb_storage.h"
+#include "nomadcast.h"
 #include "hal.h"
 #include "wifi_cred.h"
 #include "log_system.h"
+#include "log_uploader.h"
 #include "monitor.h"
 
 /* SD card */
@@ -61,6 +66,8 @@ void settings_app_register(void);
 	void weather_app_register(void);
 	void controller_process_rss(void);
 	void controller_process_download(void);
+    void podcast_controller_suspend_storage(void);
+    void podcast_controller_restore_storage(void);
 }
 
 #include "esp_check.h"  /* ESP_RETURN_ON_ERROR */
@@ -73,15 +80,8 @@ static lv_font_t s_font_harmony_with_fb;  /* mutable copy — allows fallback ch
 /* g_cjk_font defined with C linkage (used by lv_page.c etc.) */
 extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 
-/* ---- Pin map (NomadCast V1 — from nomadcast_v1.h) ---- */
+/* ---- Pin map (PCB V1.2 — from nomadcast.h) ---- */
 #define PIN_EN_POWER    NOMADCAST_PIN_AP_POWER
-#define PIN_SPI_SCK     NOMADCAST_PIN_SPI_SCK
-#define PIN_SPI_MOSI    NOMADCAST_PIN_SPI_MOSI
-#define PIN_SPI_MISO    NOMADCAST_PIN_SPI_MISO
-#define PIN_LCD_CS      NOMADCAST_PIN_LCD_CS
-#define PIN_LCD_DC      NOMADCAST_PIN_LCD_DC
-#define PIN_LCD_RST     NOMADCAST_PIN_LCD_RST
-#define PIN_LCD_POWER   NOMADCAST_PIN_LCD_POWER
 #define PIN_BACKLIGHT   NOMADCAST_PIN_LCD_BL
 #define PIN_I2C_SDA     NOMADCAST_PIN_I2C_SDA
 #define PIN_I2C_SCL     NOMADCAST_PIN_I2C_SCL
@@ -89,116 +89,19 @@ extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 #define PIN_TP_RST      NOMADCAST_PIN_TP_RST
 #define LCD_W           240
 #define LCD_H           320
-#define SPI_HOST_ID     SPI2_HOST
-#define SPI_FREQ_HZ     (40 * 1000 * 1000)
 
-/* ---- Display (ST7789 via SPI2, esp_lcd) — proven from t_ui ---- */
-static esp_lcd_panel_handle_t display_init(void)
-{
-    spi_bus_config_t spi_cfg = {
-        .mosi_io_num = PIN_SPI_MOSI, .miso_io_num = PIN_SPI_MISO,
-        .sclk_io_num = PIN_SPI_SCK, .quadwp_io_num = -1, .quadhd_io_num = -1,
-        .data4_io_num = -1, .data5_io_num = -1,
-        .data6_io_num = -1, .data7_io_num = -1,
-        .max_transfer_sz = LCD_W * 20 * 2,  /* match flush buffer height */
-        .flags = 0, .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO, .intr_flags = 0,
-    };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST_ID, &spi_cfg, SPI_DMA_CH_AUTO));
-
-    esp_lcd_panel_io_spi_config_t io_cfg = {
-        .cs_gpio_num = PIN_LCD_CS, .dc_gpio_num = PIN_LCD_DC,
-        .spi_mode = 0, .pclk_hz = SPI_FREQ_HZ, .trans_queue_depth = 10,
-        .on_color_trans_done = NULL, .user_ctx = NULL,
-        .lcd_cmd_bits = 8, .lcd_param_bits = 8,
-        .flags = {},
-    };
-    esp_lcd_panel_io_handle_t io = NULL;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI_HOST_ID, &io_cfg, &io));
-
-    esp_lcd_panel_dev_config_t panel_cfg = {
-        .reset_gpio_num = GPIO_NUM_NC, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-        .data_endian = LCD_RGB_DATA_ENDIAN_BIG,
-        .bits_per_pixel = 16,
-        .flags = {}, .vendor_config = NULL,
-    };
-    esp_lcd_panel_handle_t panel = NULL;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io, &panel_cfg, &panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
-    /* Display stays OFF until launcher renders — prevents boot garbage */
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, false));
-    return panel;
-}
-
-/* ---- HW reset (shared GPIO40 for LCD + GT911) ---- */
+/* ---- HW reset (shared GPIO43 for LCD + CST836U) ---- */
 static void hw_reset(void)
 {
-    gpio_config_t cfg = { .pin_bit_mask = BIT64(PIN_TP_RST) | BIT64(PIN_TP_INT), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
-    gpio_config(&cfg);
-    gpio_set_level(PIN_TP_INT, 0); gpio_set_level(PIN_TP_RST, 0);
-    vTaskDelay(pdMS_TO_TICKS(200));
-    gpio_set_level(PIN_TP_RST, 1);
-    vTaskDelay(pdMS_TO_TICKS(200));
-    gpio_set_level(PIN_TP_INT, 1);
+    gpio_config_t cfg = { .pin_bit_mask = BIT64(PIN_TP_RST), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
+    ESP_ERROR_CHECK(gpio_config(&cfg));
+    /* INT is input only; CST836U needs no address-selection sequence. */
     gpio_config_t in_cfg = { .pin_bit_mask = BIT64(PIN_TP_INT), .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
-    gpio_config(&in_cfg);
-    vTaskDelay(pdMS_TO_TICKS(200));
-}
-
-/* ---- Touch (GT911 via drivers/gt911, interrupt-driven) ---- */
-static gt911_dev_t    *s_gt911_dev  = NULL;
-static gt911_config_t  s_gt911_cfg;  /* preserved for sleep→wake re-init */
-static lv_indev_data_t s_touch_data;
-
-/* Touch release debounce — GT911 may register brief release/press jitter
- * when finger hovers close to the screen.  We require a stable "released"
- * state for 40 ms before LVGL sees it.  Presses are reported immediately. */
-#define TOUCH_RELEASE_DEBOUNCE_MS  40
-
-static uint32_t          s_release_since_ms = 0;   /* lv_tick when finger lifted */
-static lv_indev_state_t  s_stable_state     = LV_INDEV_STATE_RELEASED;
-static lv_point_t        s_last_press_pt    = {0, 0};
-
-static void on_gt911_touch(const gt911_touch_point_t *points, uint8_t count, void *ud)
-{
-    (void)ud;
-    if (count > 0) {
-        s_touch_data.state   = LV_INDEV_STATE_PRESSED;
-        s_touch_data.point.x = points[0].x;
-        s_touch_data.point.y = points[0].y;
-    } else {
-        s_touch_data.state = LV_INDEV_STATE_RELEASED;
-    }
-}
-
-static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
-{
-    /* ISR callback (on_gt911_touch) updates s_touch_data from gt911_irq_task.
-     * We only apply release debounce — press is reported immediately. */
-    uint32_t now = lv_tick_get();
-
-    if (s_touch_data.state == LV_INDEV_STATE_PRESSED) {
-        /* Instant press — clear any pending release debounce */
-        s_release_since_ms = 0;
-        s_stable_state     = LV_INDEV_STATE_PRESSED;
-        s_last_press_pt    = s_touch_data.point;
-    } else {
-        /* Finger lifted — start debounce timer if not already running */
-        if (s_stable_state == LV_INDEV_STATE_PRESSED) {
-            if (s_release_since_ms == 0) {
-                s_release_since_ms = now;
-            }
-            /* Only commit the release after the debounce window */
-            if (now - s_release_since_ms >= TOUCH_RELEASE_DEBOUNCE_MS) {
-                s_stable_state     = LV_INDEV_STATE_RELEASED;
-                s_release_since_ms = 0;
-            }
-            /* During the debounce window, keep reporting PRESSED at last position */
-        }
-    }
-
-    data->state = s_stable_state;
-    data->point = s_last_press_pt;
+    ESP_ERROR_CHECK(gpio_config(&in_cfg));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_TP_RST, 0));
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_TP_RST, 1));
+    vTaskDelay(pdMS_TO_TICKS(50));
 }
 
 /* ---- LVGL display flush callback ---- */
@@ -233,10 +136,10 @@ static void power_off(void)
      * for release. If the key is still held (HIGH), the EXT1 wake fires right
      * away; app_main then applies the separate power-on hold threshold. */
 
-    /* 配置 GPIO3(USB VBUS) 为输入+下拉,以便读取当前 USB 插入状态 */
+    /* 配置 GPIO9(WAKEUP_MCU) 为输入+下拉,以便读取当前 USB 插入状态 */
     {
         gpio_config_t usb_cfg = {
-            .pin_bit_mask = BIT64(NOMADCAST_PIN_USB_VBUS),
+            .pin_bit_mask = BIT64(NOMADCAST_PIN_USB_WAKEUP),
             .mode = GPIO_MODE_INPUT,
             .pull_up_en = GPIO_PULLUP_DISABLE,
             .pull_down_en = GPIO_PULLDOWN_ENABLE,
@@ -245,13 +148,13 @@ static void power_off(void)
         gpio_config(&usb_cfg);
     }
 
-    /* 唤醒源:电源键(GPIO5) + USB VBUS(GPIO3, 仅当 USB 当前未插入)。
-     * 若 USB 已插着(GPIO3 已为高),不把 GPIO3 加入唤醒源,否则进深睡后会立即唤醒。 */
+    /* 唤醒源:电源键(GPIO5) + WAKEUP_MCU(GPIO9, 仅当 USB 当前未插入)。
+     * 若 USB 已插着(GPIO9 已为高),不把 GPIO9 加入唤醒源,否则进深睡后会立即唤醒。 */
     uint64_t wake_mask = BIT64(NOMADCAST_PIN_KEY_POWER);
-    if (!gpio_get_level(NOMADCAST_PIN_USB_VBUS)) {
-        wake_mask |= BIT64(NOMADCAST_PIN_USB_VBUS);
-        rtc_gpio_pulldown_en(NOMADCAST_PIN_USB_VBUS);
-        rtc_gpio_pullup_dis(NOMADCAST_PIN_USB_VBUS);
+    if (!gpio_get_level(NOMADCAST_PIN_USB_WAKEUP)) {
+        wake_mask |= BIT64(NOMADCAST_PIN_USB_WAKEUP);
+        rtc_gpio_pulldown_en(NOMADCAST_PIN_USB_WAKEUP);
+        rtc_gpio_pullup_dis(NOMADCAST_PIN_USB_WAKEUP);
     }
     esp_sleep_enable_ext1_wakeup(wake_mask, ESP_EXT1_WAKEUP_ANY_HIGH);
 
@@ -300,10 +203,10 @@ static void check_power_on_hold(void)
         return;   /* 非 EXT1 唤醒(如复位/USB-OTG)，直接返回 */
     }
 
-    /* USB VBUS(GPIO3) 插入唤醒 → 直接开机(亮屏由正常启动流程处理)，无需长按确认 */
-    if (esp_sleep_get_ext1_wakeup_status() & BIT64(NOMADCAST_PIN_USB_VBUS)) {
+    /* WAKEUP_MCU(GPIO9) 插入唤醒 → 直接开机(亮屏由正常启动流程处理)，无需长按确认 */
+    if (esp_sleep_get_ext1_wakeup_status() & BIT64(NOMADCAST_PIN_USB_WAKEUP)) {
         ESP_LOGI(TAG, "Boot via USB plug-in");
-        rtc_gpio_deinit(NOMADCAST_PIN_USB_VBUS);
+        rtc_gpio_deinit(NOMADCAST_PIN_USB_WAKEUP);
         return;
     }
 
@@ -355,8 +258,7 @@ typedef struct {
 static void board_power_init(void)
 {
     gpio_config_t pwr = {
-        .pin_bit_mask = BIT64(PIN_EN_POWER) | BIT64(PIN_LCD_POWER) |
-                        BIT64(PIN_BACKLIGHT),
+        .pin_bit_mask = BIT64(PIN_EN_POWER),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -364,9 +266,7 @@ static void board_power_init(void)
     };
     gpio_config(&pwr);
     gpio_set_level(PIN_EN_POWER, 1);    /* 全板外设电源 */
-    gpio_set_level(PIN_LCD_POWER, 1);   /* 屏幕电源 */
-    gpio_set_level(PIN_BACKLIGHT, 1);   /* 背光 */
-    vTaskDelay(pdMS_TO_TICKS(100));
+    nomadcast_display_power_on();
     hw_reset();
 }
 
@@ -394,7 +294,7 @@ static void lvgl_display_init(esp_lcd_panel_handle_t panel)
                           g_cjk_font);
 }
 
-static lv_obj_t *boot_splash_show(esp_lcd_panel_handle_t panel)
+static lv_obj_t *boot_splash_show(void)
 {
     lv_obj_t *splash = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(splash, lv_color_black(), 0);
@@ -416,38 +316,33 @@ static lv_obj_t *boot_splash_show(esp_lcd_panel_handle_t panel)
     lv_scr_load(splash);
     lv_timer_handler();
     vTaskDelay(pdMS_TO_TICKS(50));
-    esp_lcd_panel_disp_on_off(panel, true);
+    ESP_ERROR_CHECK(display_controller_wake());
     ESP_LOGI(TAG, "Boot splash shown");
     return splash;
 }
 
 static lv_indev_t *app_touch_init(void)
 {
-    s_gt911_cfg = (gt911_config_t){
-        .rst_pin       = PIN_TP_RST,
-        .int_pin       = PIN_TP_INT,
-        .i2c_sda_pin   = PIN_I2C_SDA,
-        .i2c_scl_pin   = PIN_I2C_SCL,
-        .i2c_freq_hz   = 100000,
-        .max_width     = LCD_W,
-        .max_height    = LCD_H,
-        .use_interrupt = true,
-    };
-    if (gt911_init(&s_gt911_cfg, &s_gt911_dev) != ESP_OK) {
-        ESP_LOGW(TAG, "Touch not available");
+    static i2c_master_bus_handle_t bus;
+    i2c_master_bus_config_t config = {};
+    config.i2c_port = I2C_NUM_0;
+    config.sda_io_num = PIN_I2C_SDA;
+    config.scl_io_num = PIN_I2C_SCL;
+    config.clk_source = I2C_CLK_SRC_DEFAULT;
+    config.glitch_ignore_cnt = 7;
+    config.flags.enable_internal_pullup = true;
+    esp_err_t err = i2c_new_master_bus(&config, &bus);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Shared I2C bus unavailable: %s", esp_err_to_name(err));
         return NULL;
     }
-
-    lv_indev_t *touch_indev = lv_indev_create();
-    lv_indev_set_type(touch_indev, LV_INDEV_TYPE_POINTER);
-    lv_indev_set_read_cb(touch_indev, lvgl_touch_read_cb);
-    lv_indev_set_scroll_limit(touch_indev, 20);
-    if (s_gt911_cfg.use_interrupt) {
-        gt911_register_isr(s_gt911_dev, on_gt911_touch, NULL);
+    lv_indev_t *touch_indev = NULL;
+    err = touch_controller_init(bus, lv_display_get_default(), &touch_indev);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "CST836U unavailable: %s", esp_err_to_name(err));
     }
-
-    /* ES8156 codec shares GT911's hardware-I2C bus. */
-    audio_player_codec_init(gt911_get_i2c_bus(s_gt911_dev));
+    /* ES8156 remains available even if touch initialization fails. */
+    audio_player_codec_init(bus);
     return touch_indev;
 }
 
@@ -668,25 +563,7 @@ static void lvgl_sd_filesystem_register(void)
 
 static void storage_init(void)
 {
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.flags = SDMMC_HOST_FLAG_1BIT;
-
-    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot.clk   = NOMADCAST_PIN_SD_CLK;
-    slot.cmd   = NOMADCAST_PIN_SD_CMD;
-    slot.d0    = NOMADCAST_PIN_SD_DAT0;
-    slot.width = 1;
-
-    esp_vfs_fat_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 4,
-        .allocation_unit_size = 0,
-        .disk_status_check_enable = false,
-        .use_one_fat = false,
-    };
-    sdmmc_card_t *card = NULL;
-    esp_err_t result = esp_vfs_fat_sdmmc_mount(
-        SD_MOUNT_POINT, &host, &slot, &mount_config, &card);
+    esp_err_t result = usb_storage_mount();
     if (result != ESP_OK) {
         ESP_LOGW(TAG, "SD card not available (%s), downloads disabled",
                  esp_err_to_name(result));
@@ -701,6 +578,8 @@ static void storage_init(void)
 static void main_event_loop(void)
 {
     while (1) {
+        usb_storage_process();
+        if (usb_storage_enabled() || usb_storage_busy()) sleep_monitor_notify_activity();
         app_event_process();
         controller_process_download();
         audio_player_process();
@@ -711,6 +590,26 @@ static void main_event_loop(void)
     }
 }
 
+static void storage_prepare_usb(void)
+{
+    podcast_controller_suspend_storage();
+    audio_player_stop();
+    log_uploader_pause(true);
+    log_system_shutdown();
+    lv_image_cache_drop(NULL);
+    lv_image_header_cache_drop(NULL);
+}
+
+static void storage_resume_local(void)
+{
+    lv_image_cache_drop(NULL);
+    lv_image_header_cache_drop(NULL);
+    log_system_init();
+    log_uploader_pause(false);
+    if (hal_wifi_is_connected()) log_uploader_on_wifi_connected();
+    podcast_controller_restore_storage();
+}
+
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "=== NomadCast Starting ===");
@@ -719,10 +618,12 @@ extern "C" void app_main(void)
 
     check_power_on_hold();
     board_power_init();
-    app.panel = display_init();
+    ESP_ERROR_CHECK(usb_storage_init());
+    app.panel = nomadcast_display_init(LCD_W * 20 * 2);
+    ESP_ERROR_CHECK(display_controller_init(app.panel, PIN_BACKLIGHT));
 
     lvgl_display_init(app.panel);
-    app.boot_splash = boot_splash_show(app.panel);
+    app.boot_splash = boot_splash_show();
 
     app.touch_indev = app_touch_init();
     lvgl_tick_start();
@@ -737,6 +638,7 @@ extern "C" void app_main(void)
     lvgl_prepare_for_storage();
 
     storage_init();
+    usb_storage_set_callbacks(storage_prepare_usb, storage_resume_local);
 
     main_event_loop();
 }

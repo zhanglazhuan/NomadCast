@@ -1,19 +1,5 @@
-/*
- * Leisound V1 — GT911 Interrupt Mode Test
- *
- * Uses the project's drivers/gt911 driver with use_interrupt=true.
- *
- * Data flow:
- *   GT911 INT pin (GPIO18) falling edge → GPIO ISR → semaphore
- *   → gt911_irq_task (FreeRTOS) → I2C scan → user callback → log
- *
- * Pins (Leisound V1):
- *   EN_POWER  GPIO46
- *   I2C SDA   GPIO47
- *   I2C SCL   GPIO48
- *   TP INT    GPIO18
- *   TP RST    GPIO8
- */
+#include "nomadcast.h"
+/* PCB V1.2 wiring: nomadcast.h. Legacy GT911 protocol test; use t_touch_CST726 for CST726. */
 
 #include <stdio.h>
 #include <string.h>
@@ -28,12 +14,12 @@
 static const char *TAG = "t_touch";
 
 /* ---- Pin map (Leisound V1) ---- */
-#define PIN_I2C_POWER   GPIO_NUM_46
-#define PIN_EN_POWER   GPIO_NUM_43
-#define PIN_I2C_SDA    GPIO_NUM_38
-#define PIN_I2C_SCL    GPIO_NUM_45
-#define PIN_TP_INT     GPIO_NUM_39
-#define PIN_TP_RST     GPIO_NUM_40
+#define PIN_AP_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_EN_POWER NOMADCAST_PIN_LCD_POWER
+#define PIN_I2C_SDA NOMADCAST_PIN_I2C_SDA
+#define PIN_I2C_SCL NOMADCAST_PIN_I2C_SCL
+#define PIN_TP_INT NOMADCAST_PIN_TP_INT
+#define PIN_TP_RST NOMADCAST_PIN_TP_RST
 #define LCD_W          240
 #define LCD_H          320
 

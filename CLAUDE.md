@@ -98,8 +98,7 @@ NomadCast/
 │   └── sw_i2c/               # Shared software bit-bang I2C (SDA=38 / SCL=45)
 │
 ├── boards/
-│   ├── nomadcast_v1.h        # Pin definitions (single source of truth, NOMADCAST_*)
-│   └── leisound_v1.h         # Deprecated shim → nomadcast_v1.h (LEISOUND_* aliases)
+│   └── esp32s3/nomadcast.h # PCB V1.2 pin definitions (NOMADCAST_*)
 │
 ├── pc_demo/                  # PC simulator (SDL2 + LVGL)
 │   ├── CMakeLists.txt        # References ../../apps/settings/*.c, ../../apps/podcast/*.c

@@ -1,0 +1,81 @@
+I (268) t_CST836U: Pads: POWER=1 LCD_PWR=1 RST=1 SDA=1 SCL=1 INTESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40377e1a
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x152c
+load:0x403c8700,len:0xce4
+load:0x403cb700,len:0x2efc
+entry 0x403c8920
+I (24) boot: ESP-IDF v5.5.3-dirty 2nd stage bootloader
+I (24) boot: compile time Nov  7 2026 22:05:22
+I (25) boot: Multicore bootloader
+I (25) boot: chip revision: v0.2
+I (25) boot: efuse block revision: v1.4
+I (25) boot.esp32s3: Boot SPI Speed : 80MHz
+I (26) boot.esp32s3: SPI Mode       : DIO
+I (26) boot.esp32s3: SPI Flash Size : 16MB
+I (26) boot: Enabling RNG early entropy source...
+I (26) boot: Partition Table:
+I (26) boot: ## Label            Usage          Type ST Offset   Length
+I (27) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (27) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (27) boot:  2 factory          factory app      00 00 00010000 00100000
+I (28) boot: End of partition table
+I (28) esp_image: segment 0: paddr=00010020 vaddr=3c020020 size=09494h ( 38036) map
+I (35) esp_image: segment 1: paddr=000194bc vaddr=3fc92700 size=02ce4h ( 11492) load
+I (38) esp_image: segment 2: paddr=0001c1a8 vaddr=40374000 size=03e70h ( 15984) load
+I (42) esp_image: segment 3: paddr=00020020 vaddr=42000020 size=148e8h ( 84200) map
+I (57) esp_image: segment 4: paddr=00034910 vaddr=40377e70 size=0a7f8h ( 43000) load
+I (67) esp_image: segment 5: paddr=0003f110 vaddr=50000000 size=00020h (    32) load
+I (73) boot: Loaded app from partition at offset 0x10000
+I (73) boot: Disabling RNG early entropy source...
+I (74) cpu_start: Multicore app
+I (83) cpu_start: Pro cpu start user code
+I (83) cpu_start: cpu freq: 160000000 Hz
+I (83) app_init: Application information:
+I (84) app_init: Project name:     t_touch_CST836U
+I (84) app_init: App version:      da3641f-dirty
+I (84) app_init: Compile time:     Nov  7 2026 22:05:02
+I (84) app_init: ELF file SHA256:  de65c5ad2...
+I (84) app_init: ESP-IDF:          v5.5.3-dirty
+I (85) efuse_init: Min chip rev:     v0.0
+I (85) efuse_init: Max chip rev:     v0.99 
+I (85) efuse_init: Chip rev:         v0.2
+I (85) heap_init: Initializing. RAM available for dynamic allocation:
+I (85) heap_init: At 3FC95C88 len 00053A88 (334 KiB): RAM
+I (85) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (86) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (86) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (87) spi_flash: detected chip: generic
+I (87) spi_flash: flash io: dio
+I (87) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (88) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (88) main_task: Started on CPU0
+I (98) main_task: Calling app_main()
+I (98) t_CST836U: CST836U / PCB V1.2: SDA=41 SCL=42 RST=43 INT=44
+I (268) t_CST836U: Pads: POWER=1 LCD_PWR=1 RST=1 SDA=1 SCL=1 INT=1
+I (268) t_CST836U: COMPARE VESC reg=02 len=5 stage=combined register/read result=ESP_ERR_INVALID_STATE
+I (268) t_CST836U: COMPARE Arduino reg=00 len=7 stage=combined register/read result=ESP_ERR_INVALID_STATE
+E (268) i2c.master: I2C transaction timeout detected
+I (268) t_CST836U: COMPARE MindReset reg=00 len=15 stage=register write result=ESP_ERR_INVALID_STATE
+I (268) t_CST836U: COMPARE MindReset info reg=a6 len=6 stage=register write result=ESP_ERR_INVALID_STATE
+I (268) t_CST836U: NORMAL mode FE 00: ESP_ERR_INVALID_STATE
+I (318) t_CST836U: COMPARE VESC after normal reg=02 len=5 stage=combined register/read result=ESP_ERR_INVALID_STATE
+I (318) t_CST836U: 400000 Hz; register 02 + repeated START + 5 bytes; poll 20 ms; IRQ counted only
+I (318) t_CST836U: LCD backlight OFF. Tap, drag, hold, release; raw coordinate range assumed 240x320.
+W (318) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (1338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (2338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (3338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (4338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (5338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+I (5338) t_CST836U: STATUS reads=0 errors=252 invalid=0 presses=0 releases=0 IRQ_edges=0 INT=1
+W (6338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (7338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (8338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (9338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+W (10338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1
+I (10338) t_CST836U: STATUS reads=0 errors=502 invalid=0 presses=0 releases=0 IRQ_edges=0 INT=1
+W (11338) t_CST836U: READ ERROR ESP_ERR_INVALID_STATE (not release); INT=1

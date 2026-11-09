@@ -20,9 +20,9 @@ extern "C" {
 /**
  * @brief Initialize the sleep monitor.
  *
- * Must be called after LVGL, display, touch indev, and input are ready.
+ * Must be called after LVGL, display_controller, touch indev, and input are ready.
  *
- * @param panel       ST7789 panel handle (for disp_on_off to blank/restore).
+ * @param panel       Retained for compatibility; display_controller owns the panel.
  * @param touch_indev LVGL touch input device (for enable/disable).
  * @param timeout_min Initial timeout in minutes. 0 = never sleep.
  */
