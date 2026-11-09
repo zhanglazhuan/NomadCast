@@ -20,6 +20,7 @@
 #define mkdir_p(p) _mkdir(p)
 #elif defined(ESP_PLATFORM)
 #include <unistd.h>
+#include <dirent.h>
 #include "esp_log.h"
 #define mkdir_p(p) mkdir(p, 0755)
 #else
@@ -39,6 +40,11 @@ static const char *T_CACHE = "cache";
 #define CACHE_LOGE(...) fprintf(stderr, __VA_ARGS__)
 #endif
 
+/* forward decl — defined in the artwork section below, called from cache_init() */
+#ifdef ESP_PLATFORM
+static void artwork_cache_migrate(void);
+#endif
+
 #define CACHE_DIR      "/sdcard/.nomadcast/cache"
 #define META_FILE      "/sdcard/.nomadcast/cache/meta.json"
 #define CHART_FILE     "/sdcard/.nomadcast/cache/chart.json"
@@ -50,6 +56,9 @@ static struct {
     bool   valid;
     time_t saved_at;
 } g_entries[CACHE_COUNT];
+
+/* Storefront code the chart cache was fetched for (persisted in meta.json). */
+static char g_chart_country[8] = "";
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 
@@ -141,6 +150,17 @@ static void meta_read(void) {
             g_entries[t].saved_at = (time_t)val;
         }
     }
+
+    {
+        const char *p = strstr(buf, "\"chart_country\":\"");
+        if (p) {
+            p += strlen("\"chart_country\":\"");
+            int i = 0;
+            while (*p && *p != '"' && i < (int)sizeof(g_chart_country) - 1)
+                g_chart_country[i++] = *p++;
+            g_chart_country[i] = '\0';
+        }
+    }
 }
 
 static void meta_write(void) {
@@ -148,9 +168,10 @@ static void meta_write(void) {
     FILE *f = fopen(META_FILE, "w");
     if (!f) return;
 
-    fprintf(f, "{\"chart_at\":%lld,\"lookup_at\":%lld,\"ttl\":%d}\n",
+    fprintf(f, "{\"chart_at\":%lld,\"lookup_at\":%lld,\"chart_country\":\"%s\",\"ttl\":%d}\n",
             (long long)g_entries[CACHE_CHART].saved_at,
             (long long)g_entries[CACHE_LOOKUP].saved_at,
+            g_chart_country,
             CACHE_TTL_SECONDS);
     fclose(f);
 }
@@ -161,6 +182,9 @@ void cache_init(void) {
     memset(g_entries, 0, sizeof(g_entries));
     ensure_dir(CACHE_DIR);
     meta_read();
+#ifdef ESP_PLATFORM
+    artwork_cache_migrate();
+#endif
     CACHE_LOGI("[CACHE] chart=%s lookup=%s\n",
                g_entries[CACHE_CHART].valid  ? "valid" : "stale",
                g_entries[CACHE_LOOKUP].valid ? "valid" : "stale");
@@ -223,6 +247,7 @@ void cache_invalidate(cache_type_t type) {
     if (type >= CACHE_COUNT) return;
     g_entries[type].valid = false;
     g_entries[type].saved_at = 0;
+    if (type == CACHE_CHART) g_chart_country[0] = '\0';
     meta_write();
     CACHE_LOGW("[CACHE] Invalidated type %d\n", (int)type);
 }
@@ -233,6 +258,18 @@ void cache_purge(cache_type_t type) {
     cache_invalidate(type);
     unlink(path);
     CACHE_LOGW("[CACHE] Purged %s\n", path);
+}
+
+/* ── Chart cache country tracking ─────────────────────────────────────────── */
+
+void cache_chart_set_country(const char *country) {
+    if (!country) { g_chart_country[0] = '\0'; return; }
+    snprintf(g_chart_country, sizeof(g_chart_country), "%s", country);
+}
+
+bool cache_chart_matches(const char *country) {
+    if (!country || !g_chart_country[0]) return false;
+    return strcmp(g_chart_country, country) == 0;
 }
 
 /* ── Lookup KV cache ─────────────────────────────────────────────────────── */
@@ -334,10 +371,79 @@ bool cache_save_lookup_item(int cid, const char *data, int len) {
 /* ── Artwork cache ────────────────────────────────────────────────────────── */
 
 #define ARTWORK_DIR "/sdcard/.nomadcast/cache/artwork"
+#define ARTWORK_VERSION 2
+
+#ifdef ESP_PLATFORM
+/* iTunes artwork URLs carry a size/format token as the final path segment,
+ * e.g. ".../600x600bb.jpg" (artworkUrl600) or ".../100x100bb.png"
+ * (artworkUrl100). Served as-is, both break our 60×60 card cover:
+ *   - the .png variant is PNG bytes, but we save it under a ".jpg" name, so the
+ *     filename lies about the content;
+ *   - 600×600 (and even 100×100 PNG decoded to ARGB8888) exceeds the LVGL image
+ *     cache, so the decoded image can't be cached and LVGL re-decodes it on
+ *     every scroll frame → lag + placeholder flicker.
+ * iTunes serves the same art at any size/format; rewrite the final token to
+ * "60x60bb.jpg" (== CARD_COVER_SZ) so TJPGD decodes a ~7 KB RGB565 image that
+ * stays cached and scrolls smoothly. */
+static void artwork_url_rewrite(char *url) {
+    char *dot = strrchr(url, '.');
+    if (!dot) return;
+
+    /* Expect the "{W}x{H}bb.{ext}" token: "bb" sits just before the extension. */
+    if (dot - url < 3 || dot[-1] != 'b' || dot[-2] != 'b') return;
+
+    /* Walk back over the height digits to the token's 'x' separator. */
+    char *h = dot - 3;                        /* last height digit */
+    while (h > url && h[-1] >= '0' && h[-1] <= '9') h--;
+    if (h == url || h[-1] != 'x') return;
+
+    /* Walk back over the width digits to the token start. */
+    char *w = h - 2;
+    while (w > url && w[-1] >= '0' && w[-1] <= '9') w--;
+
+    /* "60x60bb.jpg" is never longer than any "{W}x{H}bb.{ext}" token. */
+    snprintf(w, strlen(w) + 1, "60x60bb.jpg");
+}
+
+/* Wipe artwork cached by an older firmware (different size/format) so it is
+ * re-fetched with the current small-JPEG URL. Runs once per version bump. */
+static void artwork_cache_migrate(void) {
+    char ver_path[256];
+    snprintf(ver_path, sizeof(ver_path), ARTWORK_DIR "/version");
+
+    int ver = 0;
+    FILE *f = fopen(ver_path, "rb");
+    if (f) {
+        char line[16] = "";
+        if (fgets(line, sizeof(line), f)) ver = atoi(line);
+        fclose(f);
+    }
+    if (ver == ARTWORK_VERSION) return;
+
+    ensure_dir(ARTWORK_DIR);
+
+    DIR *d = opendir(ARTWORK_DIR);
+    if (d) {
+        struct dirent *de;
+        char path[320];
+        while ((de = readdir(d)) != NULL) {
+            size_t len = strlen(de->d_name);
+            if (len < 5 || strcmp(de->d_name + len - 4, ".jpg") != 0) continue;
+            snprintf(path, sizeof(path), ARTWORK_DIR "/%s", de->d_name);
+            unlink(path);
+        }
+        closedir(d);
+    }
+
+    f = fopen(ver_path, "wb");
+    if (f) { fprintf(f, "%d\n", ARTWORK_VERSION); fclose(f); }
+    CACHE_LOGI("[CACHE] Artwork cache migrated to v%d\n", ARTWORK_VERSION);
+}
+#endif /* ESP_PLATFORM */
 
 bool cache_artwork_exists(int collection_id) {
     char path[256];
-    snprintf(path, sizeof(path), ARTWORK_DIR "/%d.png", collection_id);
+    snprintf(path, sizeof(path), ARTWORK_DIR "/%d.jpg", collection_id);
     FILE *f = fopen(path, "rb");
     if (f) { fclose(f); return true; }
     return false;
@@ -348,16 +454,33 @@ bool cache_artwork_download(int collection_id, const char *url) {
     if (cache_artwork_exists(collection_id)) return true;
 
     char path[256];
-    snprintf(path, sizeof(path), ARTWORK_DIR "/%d.png", collection_id);
+    snprintf(path, sizeof(path), ARTWORK_DIR "/%d.jpg", collection_id);
     ensure_dir(ARTWORK_DIR);
 
 #ifdef ESP_PLATFORM
     extern bool http_download_to_file(const char *download_url, const char *file_path,
                                       bool (*progress_cb)(int, int, int));
+
+    /* Fetch a small JPEG (not the raw iTunes token) so the saved ".jpg" is real
+     * JPEG that TJPGD decodes cheaply into the image cache. */
+    char art_url[512];
+    snprintf(art_url, sizeof(art_url), "%s", url);
+    artwork_url_rewrite(art_url);
+
     /* Artwork is an image → use /api/raw (raw byte passthrough). /api/play
      * transcodes its input as audio and returns an empty body for images. */
     char proxy_url[1536];
-    snprintf(proxy_url, sizeof(proxy_url), NOMADCAST_SERVER_BASE "/api/raw?url=%s", url);
+    char *w = proxy_url;
+    const char *base = NOMADCAST_SERVER_BASE "/api/raw?url=";
+    while (*base) *w++ = *base++;
+    for (const char *p = art_url; *p && (w - proxy_url) < (int)sizeof(proxy_url) - 4; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '%' || c == '#' || c == '?' || c == '&' || c == ' ' || c == '+')
+            w += snprintf(w, 4, "%%%02X", c);
+        else
+            *w++ = c;
+    }
+    *w = '\0';
     bool ok = http_download_to_file(proxy_url, path, NULL);
     if (ok) {
         CACHE_LOGI("[CACHE] Artwork saved: %s", path);

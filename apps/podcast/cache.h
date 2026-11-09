@@ -42,6 +42,12 @@ void cache_invalidate(cache_type_t type);
 /** Delete a corrupted cache entry — removes file AND marks stale */
 void cache_purge(cache_type_t type);
 
+/* Chart cache is country-specific: a cached chart is reused only when the
+ * requested country matches the one it was fetched for. Record the country
+ * before cache_save(CACHE_CHART, …), and gate the read on cache_chart_matches(). */
+void  cache_chart_set_country(const char *country);
+bool  cache_chart_matches(const char *country);
+
 /** Load cached lookup result for a collection_id (returns NULL if not cached/expired) */
 char *cache_load_lookup_item(int collection_id, int *out_len);
 

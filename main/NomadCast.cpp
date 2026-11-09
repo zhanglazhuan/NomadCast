@@ -89,8 +89,48 @@ extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 #define PIN_TP_RST      NOMADCAST_PIN_TP_RST
 #define LCD_W           240
 #define LCD_H           320
+#define SPI_HOST_ID     SPI2_HOST
+#define SPI_FREQ_HZ     (60 * 1000 * 1000)
 
-/* ---- HW reset (shared GPIO43 for LCD + CST836U) ---- */
+/* ---- Display (ST7789 via SPI2, esp_lcd) — proven from t_ui ---- */
+static esp_lcd_panel_handle_t display_init(void)
+{
+    spi_bus_config_t spi_cfg = {
+        .mosi_io_num = PIN_SPI_MOSI, .miso_io_num = PIN_SPI_MISO,
+        .sclk_io_num = PIN_SPI_SCK, .quadwp_io_num = -1, .quadhd_io_num = -1,
+        .data4_io_num = -1, .data5_io_num = -1,
+        .data6_io_num = -1, .data7_io_num = -1,
+        .max_transfer_sz = LCD_W * 40 * 2,  /* match flush buffer height */
+        .flags = 0, .isr_cpu_id = ESP_INTR_CPU_AFFINITY_AUTO, .intr_flags = 0,
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI_HOST_ID, &spi_cfg, SPI_DMA_CH_AUTO));
+
+    esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = PIN_LCD_CS, .dc_gpio_num = PIN_LCD_DC,
+        .spi_mode = 0, .pclk_hz = SPI_FREQ_HZ, .trans_queue_depth = 10,
+        .on_color_trans_done = NULL, .user_ctx = NULL,
+        .lcd_cmd_bits = 8, .lcd_param_bits = 8,
+        .flags = {},
+    };
+    esp_lcd_panel_io_handle_t io = NULL;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI_HOST_ID, &io_cfg, &io));
+
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = GPIO_NUM_NC, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .data_endian = LCD_RGB_DATA_ENDIAN_BIG,
+        .bits_per_pixel = 16,
+        .flags = {}, .vendor_config = NULL,
+    };
+    esp_lcd_panel_handle_t panel = NULL;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io, &panel_cfg, &panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
+    /* Display stays OFF until launcher renders — prevents boot garbage */
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, false));
+    return panel;
+}
+
+/* ---- HW reset (shared GPIO40 for LCD + GT911) ---- */
 static void hw_reset(void)
 {
     gpio_config_t cfg = { .pin_bit_mask = BIT64(PIN_TP_RST), .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE, .intr_type = GPIO_INTR_DISABLE };
@@ -280,7 +320,7 @@ static void lvgl_display_init(esp_lcd_panel_handle_t panel)
     lv_display_set_user_data(display, panel);
     lv_display_set_flush_cb(display, lvgl_flush_cb);
 
-    size_t buf_sz = LCD_W * 20 * sizeof(lv_color_t);
+    size_t buf_sz = LCD_W * 40 * sizeof(lv_color_t);
     lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(
         buf_sz, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     lv_color_t *buf2 = (lv_color_t *)heap_caps_malloc(

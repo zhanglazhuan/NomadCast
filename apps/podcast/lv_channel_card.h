@@ -9,7 +9,7 @@
 #define CARD_GAP        4   /* vertical gap between top and bottom rows */
 
 /* Set to 1 to load cached artwork PNGs. 0 = random solid color (much faster). */
-#define LV_CHANNEL_CARD_SHOW_ARTWORK  0
+#define LV_CHANNEL_CARD_SHOW_ARTWORK  1
 
 lv_obj_t* lv_channel_card_create(lv_obj_t* parent, const Channel* album);
 

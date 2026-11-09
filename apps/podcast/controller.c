@@ -70,6 +70,21 @@ typedef struct {
     volatile int      done_tail;
 } DownloadCtx;
 
+/* ── Artwork download worker state ──────────────────────────────────── */
+typedef struct {
+    int   collection_id;
+    char  url[2048];
+} ArtworkJob;
+
+typedef struct {
+    TaskHandle_t      task_handle;
+    SemaphoreHandle_t sem;
+    volatile bool     running;
+    volatile bool     busy;          /* true while the worker owns `jobs` */
+    ArtworkJob       *jobs;          /* batch being downloaded (owned by worker) */
+    int               job_count;
+} ArtworkCtx;
+
 /* ── Controller private context ─────────────────────────────────────── */
 typedef struct PodcastCtrlCtx {
     /* RSS feed bridge */
@@ -87,6 +102,8 @@ typedef struct PodcastCtrlCtx {
     volatile bool rss_running;
     /* Download worker */
     DownloadCtx dl;
+    /* Artwork download worker */
+    ArtworkCtx art;
 } PodcastCtrlCtx;
 
 static volatile bool s_storage_suspended;
@@ -232,6 +249,68 @@ static void rss_worker_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+/* ── Artwork download worker ─────────────────────────────────────────── */
+
+static void artwork_worker_task(void *arg) {
+    PodcastCtrlCtx *c = (PodcastCtrlCtx *)arg;
+    while (c->art.running) {
+        if (xSemaphoreTake(c->art.sem, portMAX_DELAY) == pdTRUE && c->art.running) {
+            ArtworkJob *jobs = c->art.jobs;
+            int n = c->art.job_count;
+            int ok = 0;
+            ESP_LOGI(TAG, "artwork worker: downloading %d images", n);
+            for (int i = 0; i < n; i++) {
+                if (cache_artwork_download(jobs[i].collection_id, jobs[i].url))
+                    ok++;
+            }
+            ESP_LOGI(TAG, "artwork worker: done %d/%d", ok, n);
+            free(jobs);
+            c->art.jobs = NULL;
+            c->art.job_count = 0;
+            c->art.busy = false;
+            app_event_fire(APP_EVENT_ARTWORK_READY, NULL);
+        }
+    }
+    c->art.task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* Queue the current network channels' artwork for background download.
+ * Runs on the LVGL thread after a chart import; the worker owns the batch
+ * (snapshot of collection_id + artwork_url), so the model may be re-imported
+ * underneath without use-after-free. */
+static void artwork_schedule_download(struct PodcastApp *app) {
+    PodcastCtrlCtx *ctx = ctl_ctx(app);
+    if (!ctx) { ESP_LOGW(TAG, "artwork: no ctl ctx"); return; }
+    if (!ctx->art.running) { ESP_LOGW(TAG, "artwork: worker not running"); return; }
+    if (ctx->art.busy) { ESP_LOGI(TAG, "artwork: worker busy, skip"); return; }
+    if (!app->model || app->model->network_channel_count <= 0) {
+        ESP_LOGW(TAG, "artwork: no network channels"); return;
+    }
+
+    int count = app->model->network_channel_count;
+    ArtworkJob *jobs = heap_caps_calloc(count, sizeof(ArtworkJob), MALLOC_CAP_SPIRAM);
+    if (!jobs) { ESP_LOGE(TAG, "artwork: jobs alloc failed (%d)", count); return; }
+
+    int n = 0;
+    for (int i = 0; i < count; i++) {
+        Channel *ch = &app->model->network_channels[i];
+        if (!ch->artwork_url[0]) continue;
+        if (cache_artwork_exists(ch->collection_id)) continue;
+        jobs[n].collection_id = ch->collection_id;
+        snprintf(jobs[n].url, sizeof(jobs[n].url), "%s", ch->artwork_url);
+        n++;
+    }
+
+    ESP_LOGI(TAG, "artwork: scheduling %d downloads (from %d channels)", n, count);
+    if (n == 0) { free(jobs); return; }
+
+    ctx->art.jobs = jobs;
+    ctx->art.job_count = n;
+    ctx->art.busy = true;
+    xSemaphoreGive(ctx->art.sem);
+}
+
 static void on_wifi_event(app_event_t event, const void *data)
 {
     (void)data;
@@ -242,6 +321,12 @@ static void on_wifi_event(app_event_t event, const void *data)
         dl_resume_pending(&g_podcast_app);
     } else if (event == APP_EVENT_KEY_PLAY_PAUSE) {
         podcast_controller_toggle_play_pause(&g_podcast_app);
+    } else if (event == APP_EVENT_COUNTRY_CHANGED) {
+        /* Region changed — the chart cache is keyed without country and lives
+         * 15 min, so drop it and reset to IDLE; the network page re-fetches on
+         * next open (podcast_country() reads the fresh NVS value). */
+        cache_purge(CACHE_CHART);
+        podcast_model_set_net_state(&g_podcast_app, NET_STATE_IDLE, NULL);
     }
 }
 
@@ -316,6 +401,19 @@ void podcast_controller_init(struct PodcastApp *app) {
         vSemaphoreDelete(ctx->rss_sem); free(ctx); free(app->controller); app->controller = NULL; return;
     }
 
+    /* Artwork download worker (best-effort): fetches chart artwork to the SD
+     * cache in the background so the network list never blocks the LVGL thread.
+     * If it fails to start, cards fall back to the solid-color placeholder. */
+    ctx->art.sem = xSemaphoreCreateCounting(8, 0);
+    if (ctx->art.sem &&
+        xTaskCreatePinnedToCore(artwork_worker_task, "podcast_art", 10240, ctx, 4,
+                                &ctx->art.task_handle, 1) == pdPASS) {
+        ctx->art.running = true;
+    } else {
+        if (ctx->art.sem) { vSemaphoreDelete(ctx->art.sem); ctx->art.sem = NULL; }
+        ESP_LOGW(TAG, "artwork worker init failed — artwork stays placeholder");
+    }
+
     backend_init();
     app_event_register(on_wifi_event);
 
@@ -341,6 +439,13 @@ void podcast_controller_deinit(struct PodcastApp *app) {
                 vSemaphoreDelete(ctx->dl.sem);
                 ctx->dl.sem = NULL;
             }
+            /* Stop artwork worker and release its job batch (if any) */
+            ctx->art.running = false;
+            if (ctx->art.sem) xSemaphoreGive(ctx->art.sem);
+            for (int i = 0; i < 18000 && ctx->art.task_handle; i++)
+                vTaskDelay(pdMS_TO_TICKS(10));
+            if (ctx->art.sem) { vSemaphoreDelete(ctx->art.sem); ctx->art.sem = NULL; }
+            if (ctx->art.jobs) { free(ctx->art.jobs); ctx->art.jobs = NULL; }
             free(ctx);
             app->controller->ctx = NULL;
         }
@@ -440,14 +545,11 @@ bool podcast_controller_fetch_chart_by_category(struct PodcastApp *app, int cat)
     podcast_model_set_net_state(app, NET_STATE_READY, NULL);
     ESP_LOGI(TAG, "Loaded %d channels", count);
 
-    /* Pre-download artwork to SD card cache.
-     * channels is owned by the model now (import_channels stores the pointer);
+    /* Queue artwork for background download — non-blocking. The worker task
+     * fetches them to the SD cache and fires APP_EVENT_ARTWORK_READY when done.
+     * `channels` is owned by the model now (import_channels stores the pointer);
      * do NOT free it here — model_deinit handles cleanup. */
-    for (int i = 0; i < count; i++) {
-        if (channels[i].artwork_url[0]) {
-            cache_artwork_download(channels[i].collection_id, channels[i].artwork_url);
-        }
-    }
+    artwork_schedule_download(app);
 
     return true;
 }

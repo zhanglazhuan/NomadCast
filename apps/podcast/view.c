@@ -48,6 +48,9 @@ void podcast_view_init(struct PodcastApp* app) {
 }
 
 void podcast_view_deinit(struct PodcastApp* app) {
+    /* Unregister the network page's artwork listener before freeing the view —
+     * the listener is registered once and otherwise survives app stop. */
+    podcast_view_network_deinit();
     if (app->view) {
         page_navigator_deinit(&app->view->page_nav);
         free(app->view->page_nav.registry);

@@ -22,6 +22,7 @@
 #include "launcher.h"
 #include "app_manager.h"
 #include "lang.h"
+#include "app_event.h"
 
 extern PodcastApp g_podcast_app;
 extern const lv_image_dsc_t ic_forward_media;
@@ -35,8 +36,9 @@ extern const lv_image_dsc_t ic_forward_media;
 
 typedef struct {
     lv_obj_t* dropdown;
-    lv_obj_t* content;    /* single scrollable content area */
+    lv_obj_t* content;      /* single scrollable content area */
     int       active_cat;   /* CAT_ALL or 0..CHANNEL_CATEGORY_COUNT-1 */
+    lv_timer_t* build_timer; /* chunked card-build timer (owned by this ctx) */
 } NetworkPageCtx;
 
 /* ── 页面状态 ─────────────────────────────────────────────────────────── */
@@ -60,8 +62,13 @@ typedef struct {
     int               dot_dir;        // 加载动画方向
 } NetworkPage;
 
+/* Active network page — the artwork-ready event refreshes it in place. */
+static NetworkPage *s_active_net_page = NULL;
+static bool         s_net_evt_registered = false;
+
 /* 前向声明 — timer 回调中引用 */
 static void stop_all_timers(NetworkPage* np);
+static void cancel_build_timer(NetworkPageCtx* ctx);
 static lv_obj_t* build_loading(lv_obj_t* parent);
 static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent);
 static void build_error(lv_obj_t* parent, const char* msg, NetworkPage* np);
@@ -124,7 +131,8 @@ static void on_page_delete(lv_event_t* e) {
     NetworkPage* np = lv_event_get_user_data(e);
     if (!np) return;
     stop_all_timers(np);
-    if (np->ctx) { free(np->ctx); np->ctx = NULL; }
+    if (np->ctx) { cancel_build_timer(np->ctx); free(np->ctx); np->ctx = NULL; }
+    if (s_active_net_page == np) s_active_net_page = NULL;
     free(np);
     printf("[INF] Network page timers stopped\n"); fflush(stdout);
 }
@@ -181,6 +189,7 @@ static void poll_ready_cb(lv_timer_t* timer) {
 
     if (st == NET_STATE_READY) {
         stop_all_timers(np);
+        np->state = NP_STATE_ONLINE;
 
         /* 数据就绪 → 构建内容 */
         lv_obj_clean(np->container);
@@ -242,6 +251,7 @@ static lv_obj_t* build_loading(lv_obj_t* parent) {
 #define CARDS_PER_TICK 6  /* create this many cards per LVGL tick */
 
 typedef struct {
+    NetworkPageCtx *ctx;      /* owning ctx — cleared when the timer is torn down */
     lv_obj_t      *row;
     const Channel **albums;
     int             count;
@@ -252,8 +262,11 @@ typedef struct {
 static void build_card_chunk_cb(lv_timer_t *timer) {
     card_build_ctx_t *bc = (card_build_ctx_t *)lv_timer_get_user_data(timer);
     if (!bc || !bc->row || !lv_obj_is_valid(bc->row)) {
-        if (bc && bc->albums) free((void *)bc->albums);
-        free(bc);
+        if (bc) {
+            if (bc->ctx) bc->ctx->build_timer = NULL;
+            if (bc->albums) free((void *)bc->albums);
+            free(bc);
+        }
         lv_timer_del(timer);
         return;
     }
@@ -268,15 +281,35 @@ static void build_card_chunk_cb(lv_timer_t *timer) {
     bc->next = end;
 
     if (bc->next >= bc->count) {
+        if (bc->ctx) bc->ctx->build_timer = NULL;
         free((void *)bc->albums);
         free(bc);
         lv_timer_del(timer);
     }
 }
 
+/* Cancel a pending chunked card-build, releasing its batch.  Called before a
+ * list is rebuilt in place and when the page is deleted, so a timer never
+ * outlives the page (and its `row`) it was building into. */
+static void cancel_build_timer(NetworkPageCtx *ctx) {
+    if (!ctx || !ctx->build_timer) return;
+    card_build_ctx_t *bc = (card_build_ctx_t *)lv_timer_get_user_data(ctx->build_timer);
+    lv_timer_del(ctx->build_timer);
+    ctx->build_timer = NULL;
+    if (bc) {
+        if (bc->ctx) bc->ctx->build_timer = NULL;
+        if (bc->albums) free((void *)bc->albums);
+        free(bc);
+    }
+}
+
 static void refresh_list(NetworkPageCtx* ctx, int cat) {
     lv_obj_t* page = ctx->content;
     if (!page) return;
+
+    /* A previous chunked build may still be in flight; drop it so it can't
+     * touch `page` after we clean/rebuild it below. */
+    cancel_build_timer(ctx);
     lv_obj_clean(page);
 
     int total = 0;
@@ -294,6 +327,7 @@ static void refresh_list(NetworkPageCtx* ctx, int cat) {
                 memcpy(albums + total, a, n * sizeof(Channel *));
                 total += n;
             }
+            free((void *)a);  /* get_network_page returns a freshly copied array */
         }
     } else {
         albums = podcast_model_get_network_page(&g_podcast_app,
@@ -314,10 +348,28 @@ static void refresh_list(NetworkPageCtx* ctx, int cat) {
     if (total == 0) { free(albums); return; }
 
     card_build_ctx_t *bc = (card_build_ctx_t *)calloc(1, sizeof(card_build_ctx_t));
+    bc->ctx    = ctx;
     bc->row    = page;
     bc->albums = albums;
     bc->count  = total;
-    lv_timer_create(build_card_chunk_cb, 1, bc);
+    ctx->build_timer = lv_timer_create(build_card_chunk_cb, 1, bc);
+}
+
+/* ── Artwork ready → rebuild the list so cached JPEGs show ───────────── */
+
+static void on_artwork_ready(app_event_t event, const void *data) {
+    (void)data;
+    if (event != APP_EVENT_ARTWORK_READY) return;
+    /* Only act while the podcast app is actually running — the listener is
+     * registered once and the app global is memset on stop, so guard against a
+     * late/queued event firing after teardown. */
+    if (!g_podcast_app.model || !g_podcast_app.view) return;
+    NetworkPage *np = s_active_net_page;
+    if (!np || !np->content_built || np->state != NP_STATE_ONLINE) return;
+    if (!lv_obj_is_valid(np->container)) return;
+    NetworkPageCtx *ctx = np->ctx;
+    if (!ctx || !ctx->content) return;
+    refresh_list(ctx, ctx->active_cat);
 }
 
 static void on_dropdown_changed(lv_event_t* e) {
@@ -531,6 +583,11 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
     NetworkPage* np = malloc(sizeof(NetworkPage));
     memset(np, 0, sizeof(NetworkPage));
     np->container = page.container;
+    s_active_net_page = np;
+    if (!s_net_evt_registered) {
+        app_event_register(on_artwork_ready);
+        s_net_evt_registered = true;
+    }
 
     /* ── WiFi check first — gate all network operations ── */
     if (!hal_wifi_is_connected()) {
@@ -583,4 +640,16 @@ static lv_obj_t* build_network_page(struct PodcastApp* app, void* user_data) {
 
 void podcast_view_network_init_registry(struct PodcastApp* app) {
     PAGE_REGISTE(app, PAGE_NETWORK, build_network_page);
+}
+
+/* Tear down the page-level artwork listener.  The listener is registered once
+ * (guarded by s_net_evt_registered) and would otherwise survive the app's
+ * stop, leaving a callback that dereferences a stale s_active_net_page / the
+ * memset global on a later, queued APP_EVENT_ARTWORK_READY. */
+void podcast_view_network_deinit(void) {
+    if (s_net_evt_registered) {
+        app_event_unregister(on_artwork_ready);
+        s_net_evt_registered = false;
+    }
+    s_active_net_page = NULL;
 }

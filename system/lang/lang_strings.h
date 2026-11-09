@@ -288,6 +288,8 @@ enum {
     STR_USB_HINT,
     STR_USB_FAILED,
     STR_USB_SWITCHING,
+    /* Settings — General (country/region) */
+    STR_COUNTRY_REGION,
 
     STR_COUNT
 };

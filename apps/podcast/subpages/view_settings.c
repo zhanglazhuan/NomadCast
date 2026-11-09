@@ -12,6 +12,8 @@
 #include "lv_page.h"
 #include "flash_store.h"
 #include "lang.h"
+#include "countries.h"
+#include "app_event.h"
 
 extern PodcastApp g_podcast_app;
 
@@ -25,15 +27,14 @@ static void add_setting_label(lv_obj_t* parent, const char* text) {
 }
 
 /* ── Country (Apple Podcasts region) ─────────────────────────────────────── */
-/* Parallel arrays: display name ↔ ISO code persisted in flash ("podcast"/"country"). */
-static const char *k_country_codes[] = {"cn","us","gb","jp","de","fr","ca","au"};
-#define COUNTRY_COUNT ((int)(sizeof(k_country_codes) / sizeof(k_country_codes[0])))
+/* Storefront code ↔ localized name lives in the shared system/lang/countries
+ * table; the code is persisted in flash ("podcast"/"country"). */
 
 static void on_country_changed(lv_event_t *e) {
     lv_obj_t *dd = lv_event_get_target(e);
     int sel = lv_dropdown_get_selected(dd);
-    if (sel >= 0 && sel < COUNTRY_COUNT)
-        flash_set_str("podcast", "country", k_country_codes[sel]);
+    flash_set_str("podcast", "country", country_code_at(sel));
+    app_event_fire(APP_EVENT_COUNTRY_CHANGED, NULL);
 }
 
 static void on_quality_changed(lv_event_t *e) {
@@ -58,15 +59,11 @@ static lv_obj_t* build_settings_page(struct PodcastApp* app, void* user_data) {
     // ---- 国家/地区 (Apple Podcasts region) ----
     char cc[8];
     flash_get_str("podcast", "country", cc, sizeof(cc), "cn");
-    int country_idx = 0;
-    for (int i = 0; i < COUNTRY_COUNT; i++)
-        if (strcmp(k_country_codes[i], cc) == 0) { country_idx = i; break; }
+    int country_idx = country_index_of(cc);
+    if (country_idx < 0) country_idx = 0;
 
-    char country_opts[256];
-    snprintf(country_opts, sizeof(country_opts), "%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s",
-             tr(STR_COUNTRY_CHINA), tr(STR_COUNTRY_US), tr(STR_COUNTRY_UK),
-             tr(STR_COUNTRY_JAPAN), tr(STR_COUNTRY_GERMANY), tr(STR_COUNTRY_FRANCE),
-             tr(STR_COUNTRY_CANADA), tr(STR_COUNTRY_AUSTRALIA));
+    char country_opts[512];
+    country_options_str(country_opts, sizeof(country_opts));
 
     add_setting_label(cont, tr(STR_COUNTRY));
     lv_obj_t* ccd = lv_dropdown_create(cont);

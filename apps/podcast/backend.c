@@ -116,7 +116,7 @@ int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int li
 
     for (int attempt = 0; attempt < 2; attempt++) {
         if (!body) {
-            if (attempt == 0 && cache_is_valid(CACHE_CHART)) {
+            if (attempt == 0 && cache_is_valid(CACHE_CHART) && cache_chart_matches(country)) {
                 body = cache_load(CACHE_CHART, &body_len);
                 if (body) {
                     BK_LOGI("[BACKEND] chart from cache: %d bytes\n", body_len);
@@ -146,6 +146,7 @@ int backend_fetch_chart(bk_channel_t **out_channels, const char *country, int li
                 if (body) http_free_response_body(body);
                 return 0;
             }
+            cache_chart_set_country(country);
             cache_save(CACHE_CHART, body, body_len);
         }
 
