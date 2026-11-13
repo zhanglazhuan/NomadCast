@@ -1,23 +1,12 @@
-/*
- * NomadCast — SD Card Test (ESP-IDF Native SDMMC 1-bit Mode)
- *
- * 参考 Leisound V1 硬件针脚定义，使用 ESP-IDF 原生 sdmmc + VFS FAT
- * 对 SD 卡进行完整的读写验证。
- *
- * === Leisound V1 SD 卡针脚 ===
- *
- *   SD Pin | SD 模式  | GPIO
- *   -------|----------|-------
- *   5      | CLK      | GPIO1
- *   2      | CMD      | GPIO14
- *   7      | DAT0     | GPIO2
- *
- * === Leisound V1 其他相关针脚 ===
- *
- *   GPIO46  EN_POWER  全板 3.3V/5V 电源使能 (HIGH=ON)
+/* NomadCast SD card read/write test: PCB V1.2, native SDMMC 1-bit.
+ * Pins are selected by nomadcast.h: CLK=2, CMD=40, DAT0=1, power=46.
  */
 
 #include <stdio.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "nomadcast.h"
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -33,15 +22,10 @@
 
 static const char *TAG = "t_sd";
 
-/* ========================================================================
- * Leisound V1 针脚定义
- * ======================================================================== */
-
-#define PIN_EN_POWER   GPIO_NUM_46   // 全板外设电源使能 (HIGH = ON)
-
-#define PIN_SD_CLK     GPIO_NUM_10    // SD CLK
-#define PIN_SD_CMD     GPIO_NUM_11   // SD CMD
-#define PIN_SD_DAT0    GPIO_NUM_9    // SD DAT0
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define PIN_SD_DAT0 NOMADCAST_PIN_SD_DAT0
 
 /* ========================================================================
  * 测试参数
@@ -163,8 +147,8 @@ static bool test_power_init(void)
 {
     ESP_LOGI(TAG, "--- Test 1: Power Init ---");
 
-    gpio_set_direction(PIN_EN_POWER, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_EN_POWER, 1);
+    ESP_ERROR_CHECK(gpio_set_direction(PIN_EN_POWER, GPIO_MODE_INPUT_OUTPUT));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_EN_POWER, 1));
     ESP_LOGI(TAG, "  EN_POWER (GPIO46) → HIGH");
 
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -251,7 +235,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  NomadCast — SD Card Test");
+    ESP_LOGI(TAG, "  NomadCast — SD Card Test / PCB V1.2");
     ESP_LOGI(TAG, "  Native SDMMC 1-bit Mode");
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "");

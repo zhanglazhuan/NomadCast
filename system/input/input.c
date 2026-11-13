@@ -12,7 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "input.h"
-#include "leisound_v1.h"
+#include "nomadcast.h"
 
 static const char *TAG = "input";
 
@@ -39,21 +39,21 @@ static void btn_handler(void *handle, void *gpio_ptr)
     input_event_t event;
 
     switch (gpio) {
-    case LEISOUND_PIN_KEY_VOL_DOWN:
+    case NOMADCAST_PIN_KEY_VOL_DOWN:
         if (evt == BUTTON_SINGLE_CLICK)      event = INPUT_EVENT_VOL_DOWN;
         else if (evt == BUTTON_LONG_PRESS_START) event = INPUT_EVENT_PREV_TRACK;
         else return;
         break;
-    case LEISOUND_PIN_KEY_VOL_UP:
+    case NOMADCAST_PIN_KEY_VOL_UP:
         if (evt == BUTTON_SINGLE_CLICK)      event = INPUT_EVENT_VOL_UP;
         else if (evt == BUTTON_LONG_PRESS_START) event = INPUT_EVENT_NEXT_TRACK;
         else return;
         break;
-    case LEISOUND_PIN_KEY_STOP:
+    case NOMADCAST_PIN_KEY_STOP:
         if (evt == BUTTON_SINGLE_CLICK)      event = INPUT_EVENT_PLAY_PAUSE;
         else return;
         break;
-    case LEISOUND_PIN_KEY_POWER:
+    case NOMADCAST_PIN_KEY_POWER:
         {
             /* 开机连按/粘滞保护：开机时长按残留的高电平会被 iot_button 误判成
              * 新的长按/短按。开机后必须等到第一次松手，才恢复正常按键逻辑。 */
@@ -131,10 +131,10 @@ void input_init(input_callback_t cb, void *user_data)
     s_input.callback  = cb;
     s_input.user_data = user_data;
     s_input.subscriber_count = 0;
-    create_button(LEISOUND_PIN_KEY_VOL_DOWN, LONG_PRESS_MS);
-    create_button(LEISOUND_PIN_KEY_VOL_UP,   LONG_PRESS_MS);
-    create_button(LEISOUND_PIN_KEY_STOP,     LONG_PRESS_MS);
-    create_button(LEISOUND_PIN_KEY_POWER,    POWER_OFF_LONG_PRESS_MS);
+    create_button(NOMADCAST_PIN_KEY_VOL_DOWN, LONG_PRESS_MS);
+    create_button(NOMADCAST_PIN_KEY_VOL_UP,   LONG_PRESS_MS);
+    create_button(NOMADCAST_PIN_KEY_STOP,     LONG_PRESS_MS);
+    create_button(NOMADCAST_PIN_KEY_POWER,    POWER_OFF_LONG_PRESS_MS);
     ESP_LOGI(TAG, "All keys ready");
 }
 

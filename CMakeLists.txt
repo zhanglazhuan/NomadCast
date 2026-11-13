@@ -7,9 +7,13 @@ cmake_minimum_required(VERSION 3.16)
 # Extra component paths (system/ holds system-level modules)
 set(EXTRA_COMPONENT_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/system/uilv
-    ${CMAKE_CURRENT_SOURCE_DIR}/drivers
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers/cst836u
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers/es8156
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers/st7789
     ${CMAKE_CURRENT_SOURCE_DIR}/system/app_manager
     ${CMAKE_CURRENT_SOURCE_DIR}/system/launcher
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/usb_storage
+    ${CMAKE_CURRENT_SOURCE_DIR}/system/controller
     ${CMAKE_CURRENT_SOURCE_DIR}/system/input
     ${CMAKE_CURRENT_SOURCE_DIR}/system/sleep_monitor
     ${CMAKE_CURRENT_SOURCE_DIR}/system/alarm_service

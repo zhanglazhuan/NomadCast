@@ -1,19 +1,6 @@
 /*
- * Leisound — ST7789V TFT LCD Display Test (ESP-IDF Native SPI)
- *
- * === Leisound V1 屏幕针脚 ===
- *
- *   Signal  | GPIO | 说明
- *   --------|------|------------------
- *   EN_PWR  |  46  | 全板外设电源使能 (HIGH=ON)
- *   SPI SCK |  12  | SPI2 时钟
- *   SPI MOSI|  11  | SPI2 主机输出
- *   SPI MISO|  13  | SPI2 主机输入 (LCD 不需要)
- *   LCD CS  |  10  | 屏幕片选 (LOW 有效)
- *   LCD DC  |  45  | 数据/命令选择 (HIGH=数据, LOW=命令)
- *   LCD RST |   8  | 硬件复位 (LOW 有效)
- *
- * 屏幕参数: ST7789V (Sitronix), 240x320, RGB565, 4-Wire SPI
+ * ST7789V 240x320 display test for design/PCB/网络收音机-V1.2.pdf.
+ * Uses the NomadCast V2 firmware board profile (MCU U7, page 4).
  */
 
 #include <stdio.h>
@@ -28,6 +15,8 @@
 #include "esp_lcd_panel_st7789.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
+#include "esp_heap_caps.h"
+#include "nomadcast.h"
 
 static const char *TAG = "t_display";
 
@@ -35,18 +24,14 @@ static const char *TAG = "t_display";
  * Pin Definitions
  * ======================================================================== */
 
-#define PIN_LCD_POWER  GPIO_NUM_43
-#define PIN_BACKLIGHT  GPIO_NUM_12
-
-#define PIN_LCD_INT    GPIO_NUM_39
-#define PIN_LCD_CS     GPIO_NUM_48
-#define PIN_LCD_DC     GPIO_NUM_47
-#define PIN_LCD_RST    GPIO_NUM_40
-
-/* SPI2 pins */
-#define PIN_SPI_SCK    GPIO_NUM_21
-#define PIN_SPI_MOSI   GPIO_NUM_14
-#define PIN_SPI_MISO   GPIO_NUM_13
+#define PIN_LCD_POWER  NOMADCAST_PIN_LCD_POWER
+#define PIN_BACKLIGHT  NOMADCAST_PIN_LCD_BL
+#define PIN_LCD_CS     NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC     NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST    NOMADCAST_PIN_LCD_RST
+#define PIN_SPI_SCK    NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI   NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO   NOMADCAST_PIN_SPI_MISO
 
 /* ========================================================================
  * Display Constants
@@ -339,7 +324,7 @@ static void board_power_on(void)
 {
     ESP_LOGI(TAG, "--- Board Power & Backlight Init ---");
     
-    // 1. 配置屏幕总电源 (GPIO43) 与 背光 (GPIO12) 为输出
+    // 1. 配置屏幕总电源 (GPIO21) 与 背光 (GPIO39) 为输出
     gpio_config_t cfg = {
         .pin_bit_mask = BIT64(PIN_LCD_POWER) | BIT64(PIN_BACKLIGHT),
         .mode = GPIO_MODE_OUTPUT,
@@ -348,14 +333,14 @@ static void board_power_on(void)
     };
     gpio_config(&cfg);
 
-    // 2. 先打开屏幕电源 (TXD0 / GPIO43)
+    // 2. 先打开屏幕电源 (GPIO21)
     gpio_set_level(PIN_LCD_POWER, 1);
-    ESP_LOGI(TAG, "  LCD_Power (GPIO43) -> HIGH");
+    ESP_LOGI(TAG, "  LCD_Power (GPIO21) -> HIGH");
     vTaskDelay(pdMS_TO_TICKS(50));
 
-    // 3. 点亮背光 (IO12)
+    // 3. 点亮背光 (IO39)
     gpio_set_level(PIN_BACKLIGHT, 1);
-    ESP_LOGI(TAG, "  Backlight (GPIO12) -> HIGH");
+    ESP_LOGI(TAG, "  Backlight (GPIO39) -> HIGH");
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
@@ -372,7 +357,7 @@ static void lcd_hw_reset(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(PIN_LCD_RST, 1);
     vTaskDelay(pdMS_TO_TICKS(120));   /* Wait for LCD to initialize */
-    ESP_LOGI(TAG, "  RST (GPIO8): LOW 10ms -> HIGH, 120ms wait");
+    ESP_LOGI(TAG, "  RST (GPIO43): LOW 10ms -> HIGH, 120ms wait");
 }
 
 /* ========================================================================
@@ -389,7 +374,7 @@ static void test_fill_colors(uint16_t *buf, esp_lcd_panel_handle_t panel)
     for (int i = 0; i < 5; i++) {
         ESP_LOGI(TAG, "  %s", names[i]);
         fill_screen(buf, colors[i]);
-        esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf);
+        ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf));
         vTaskDelay(pdMS_TO_TICKS(800));
     }
 }
@@ -407,7 +392,7 @@ static void test_color_bars(uint16_t *buf, esp_lcd_panel_handle_t panel)
     for (int i = 0; i < 8; i++) {
         fill_rect(buf, i * bar_w, 0, bar_w, LCD_H, colors[i]);
     }
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf);
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf));
     vTaskDelay(pdMS_TO_TICKS(1500));
 }
 
@@ -425,7 +410,7 @@ static void test_rectangles(uint16_t *buf, esp_lcd_panel_handle_t panel)
         int w = LCD_W - 2 * margin * i, h = LCD_H - 2 * margin * i;
         draw_rect(buf, x, y, w, h, colors[i]);
     }
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf);
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf));
     vTaskDelay(pdMS_TO_TICKS(1500));
 }
 
@@ -453,8 +438,8 @@ static void test_text_card(uint16_t *buf, esp_lcd_panel_handle_t panel)
 
     /* Hardware pin info */
     draw_string(buf, 15, 155, "Pin Map:", COLOR_YELLOW, COLOR_BLACK);
-    draw_string(buf, 15, 175, "  SCK=12  MOSI=11  CS=10", COLOR_WHITE, COLOR_BLACK);
-    draw_string(buf, 15, 195, "  DC =45  RST =8   PWR=46", COLOR_WHITE, COLOR_BLACK);
+    draw_string(buf, 15, 175, "  SCK=45 MOSI=38 CS=48", COLOR_WHITE, COLOR_BLACK);
+    draw_string(buf, 15, 195, "  DC=47 RST=43 PWR=21", COLOR_WHITE, COLOR_BLACK);
 
     /* Separator */
     fill_rect(buf, 10, 220, LCD_W - 20, 3, COLOR_WHITE);
@@ -467,7 +452,7 @@ static void test_text_card(uint16_t *buf, esp_lcd_panel_handle_t panel)
     fill_rect(buf, 5, LCD_H - 35, LCD_W - 10, 30, COLOR_GRAY);
     draw_string(buf, LCD_W / 2 - 85, LCD_H - 28, "TEST PASSED", COLOR_BLACK, COLOR_GRAY);
 
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf);
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf));
     vTaskDelay(pdMS_TO_TICKS(3000));
 }
 
@@ -483,7 +468,7 @@ static void test_gradient(uint16_t *buf, esp_lcd_panel_handle_t panel)
             buf[y * LCD_W + x] = rgb565(r, g, b);
         }
     }
-    esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf);
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, LCD_W, LCD_H, buf));
     vTaskDelay(pdMS_TO_TICKS(2000));
 }
 
@@ -495,7 +480,7 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "======================================================");
-    ESP_LOGI(TAG, "  Leisound V1 — ST7789V TFT LCD Display Test");
+    ESP_LOGI(TAG, "  NomadCast V2 (PCB V1.2) — ST7789V Display Test");
     ESP_LOGI(TAG, "  Driver: esp_lcd_panel_st7789 | ESP-IDF");
     ESP_LOGI(TAG, "======================================================");
 
@@ -535,7 +520,7 @@ void app_main(void)
     /* --- 5. Create ST7789 panel --- */
     ESP_LOGI(TAG, "--- ST7789 Panel Init ---");
     esp_lcd_panel_dev_config_t panel_cfg = {
-        .reset_gpio_num = PIN_LCD_RST,
+        .reset_gpio_num = GPIO_NUM_NC, /* Already reset above; shared with touch. */
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = 16,
     };
@@ -586,7 +571,7 @@ void app_main(void)
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
-        ESP_LOGI(TAG, "STATUS: DISPLAY TEST PASSED");
+        ESP_LOGI(TAG, "STATUS: test patterns sent; confirm display visually");
     }
 
 fail:

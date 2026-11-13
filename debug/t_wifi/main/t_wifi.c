@@ -1,3 +1,4 @@
+#include "nomadcast.h"
 /*
  * t_wifi — WiFi Scan + Connect + HTTP Download to SD Card
  *
@@ -27,17 +28,17 @@
 
 static const char *TAG = "t_wifi";
 
-#define WIFI_SSID       "zhanglazhuan"
-#define WIFI_PASSWORD   "zhangla1991"
+#define WIFI_SSID       "my_test_wifi"
+#define WIFI_PASSWORD   "my_test_wifi"
 #define WIFI_TIMEOUT_MS 15000
 #define SCAN_MAX_AP     30
 
 #define DOWNLOAD_URL    "http://fuss10.elemecdn.com/e/5d/4a731a90594a4af544c0c25941171jpeg.jpeg"
 #define SAVE_PATH       "/sdcard/downloaded_file"
 
-#define PIN_SD_CLK      GPIO_NUM_1
-#define PIN_SD_CMD      GPIO_NUM_14
-#define PIN_SD_D0       GPIO_NUM_2
+#define PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define PIN_SD_D0 NOMADCAST_PIN_SD_DAT0
 #define SD_MOUNT_POINT  "/sdcard"
 
 /* ========================================================================

@@ -1,0 +1,258 @@
+I (349) t_CST726: Power/reset readback: AP=1 LCD_PWR=1 RST=1 (coESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40377e1a
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x152c
+load:0x403c8700,len:0xce4
+load:0x403cb700,len:0x2efc
+entry 0x403c8920
+I (24) boot: ESP-IDF v5.5.3-dirty 2nd stage bootloader
+I (24) boot: compile time Nov  7 2026 20:05:08
+I (25) boot: Multicore bootloader
+I (25) boot: chip revision: v0.2
+I (25) boot: efuse block revision: v1.4
+I (25) boot.esp32s3: Boot SPI Speed : 80MHz
+I (25) boot.esp32s3: SPI Mode       : DIO
+I (26) boot.esp32s3: SPI Flash Size : 16MB
+I (26) boot: Enabling RNG early entropy source...
+I (26) boot: Partition Table:
+I (26) boot: ## Label            Usage          Type ST Offset   Length
+I (27) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (27) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (27) boot:  2 factory          factory app      00 00 00010000 00100000
+I (28) boot: End of partition table
+I (28) esp_image: segment 0: paddr=00010020 vaddr=3c020020 size=09604h ( 38404) map
+I (35) esp_image: segment 1: paddr=0001962c vaddr=3fc92700 size=02ce4h ( 11492) load
+I (38) esp_image: segment 2: paddr=0001c318 vaddr=40374000 size=03d00h ( 15616) load
+I (42) esp_image: segment 3: paddr=00020020 vaddr=42000020 size=148ach ( 84140) map
+I (57) esp_image: segment 4: paddr=000348d4 vaddr=40377d00 size=0a968h ( 43368) load
+I (67) esp_image: segment 5: paddr=0003f244 vaddr=50000000 size=00020h (    32) load
+I (73) boot: Loaded app from partition at offset 0x10000
+I (73) boot: Disabling RNG early entropy source...
+I (74) cpu_start: Multicore app
+I (83) cpu_start: Pro cpu start user code
+I (83) cpu_start: cpu freq: 160000000 Hz
+I (83) app_init: Application information:
+I (84) app_init: Project name:     t_touch_CST726
+I (84) app_init: App version:      da3641f-dirty
+I (84) app_init: Compile time:     Nov  7 2026 20:04:59
+I (84) app_init: ELF file SHA256:  6e96cb98d...
+I (84) app_init: ESP-IDF:          v5.5.3-dirty
+I (84) efuse_init: Min chip rev:     v0.0
+I (85) efuse_init: Max chip rev:     v0.99 
+I (85) efuse_init: Chip rev:         v0.2
+I (85) heap_init: Initializing. RAM available for dynamic allocation:
+I (85) heap_init: At 3FC95C88 len 00053A88 (334 KiB): RAM
+I (85) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (86) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (86) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (87) spi_flash: detected chip: generic
+I (87) spi_flash: flash io: dio
+I (87) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (88) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (88) main_task: Started on CPU0
+I (98) main_task: Calling app_main()
+I (98) t_CST726: CST726 Keystone protocol test / PCB V1.2: SDA=41 SCL=42 RST=43 INT=44
+I (348) t_CST726: Power/reset readback: AP=1 LCD_PWR=1 RST=1 (commanded HIGH)
+I (348) t_CST726: Bus idle: SDA=1 SCL=1 RST=1 INT=1
+I (348) t_CST726: Targeted 0x15 probe: ESP_ERR_NOT_FOUND; no full-bus scan
+I (348) t_CST726: I2C bus reset after scan: ESP_OK
+I (348) t_CST726: Transport selected; command 00 00 + STOP + read 7 bytes. Touch/drag/release and test all corners.
+I (348) t_CST726: Serial-only test: LCD backlight stays off; no chip-info register assumptions.
+W (1088) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (1088) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (1348) t_CST726: 00 00 01 80 00 01 3f
+I (1348) t_CST726: TOUCH x=0 y=319
+I (1658) t_CST726: 00 00 01 80 00 00 07
+I (1658) t_CST726: TOUCH x=0 y=7
+E (1728) i2c.master: I2C transaction timeout detected
+E (1738) i2c.master: I2C transaction timeout detected
+E (1748) i2c.master: I2C transaction timeout detected
+E (1748) i2c.master: I2C transaction timeout detected
+E (1758) i2c.master: I2C transaction timeout detected
+I (2088) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (2088) t_CST726: 00 00 00 ff ff ff ff
+I (2958) t_CST726: 00 00 01 80 e2 00 9f
+I (2958) t_CST726: TOUCH x=226 y=159
+W (3408) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (3418) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (3868) i2c.master: I2C bus is still busy but software timeout detected
+I (4158) t_CST726: 00 00 01 81 ad 2e 29
+I (4158) t_CST726: TOUCH x=429 y=11817 [outside 240x320; raw coordinates preserved]
+E (4168) i2c.master: I2C transaction timeout detected
+E (4168) i2c.master: I2C transaction timeout detected
+E (4178) i2c.master: I2C transaction timeout detected
+E (4188) i2c.master: I2C transaction timeout detected
+E (4198) i2c.master: I2C transaction timeout detected
+E (4198) i2c.master: I2C transaction timeout detected
+E (4208) i2c.master: I2C transaction timeout detected
+E (4218) i2c.master: I2C transaction timeout detected
+E (4228) i2c.master: I2C transaction timeout detected
+I (4418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (4418) t_CST726: 00 00 00 ff ff ff ff
+I (5028) t_CST726: 00 00 01 80 4f 00 00
+I (5028) t_CST726: TOUCH x=79 y=0
+I (5348) t_CST726: STATUS reads=410 errors=5492 changes=5 no_data=2754 IRQ_edges=16683 INT=1
+I (5418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (5418) t_CST726: 00 00 00 ff ff ff ff
+I (6418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (6418) t_CST726: 00 00 00 ff ff ff ff
+I (7098) t_CST726: 00 00 01 80 88 01 3f
+I (7098) t_CST726: TOUCH x=136 y=319
+W (7418) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (7418) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (7678) t_CST726: 00 00 02 45 1b 3e 7a
+I (7678) t_CST726: RELEASE x=1307 y=15994 [outside 240x320; raw coordinates preserved]
+I (8418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (8418) t_CST726: 00 00 00 ff ff ff ff
+I (9418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (9418) t_CST726: 00 00 00 ff ff ff ff
+I (10158) t_CST726: 00 00 01 80 e0 00 00
+I (10158) t_CST726: TOUCH x=224 y=0
+I (10348) t_CST726: STATUS reads=607 errors=9547 changes=8 no_data=6235 IRQ_edges=16784 INT=1
+I (10418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (10418) t_CST726: 00 00 00 ff ff ff ff
+I (11418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (11418) t_CST726: 00 00 00 ff ff ff ff
+I (11738) t_CST726: 00 00 01 80 0b 01 26
+I (11738) t_CST726: TOUCH x=11 y=294
+I (12418) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (12418) t_CST726: 00 00 00 ff ff ff ff
+I (12728) t_CST726: 00 00 01 80 c8 00 02
+I (12728) t_CST726: TOUCH x=200 y=2
+I (13048) t_CST726: 00 00 01 80 89 00 00
+I (13048) t_CST726: TOUCH x=137 y=0
+I (13348) t_CST726: 00 00 02 80 a5 00 00
+I (13348) t_CST726: TOUCH x=165 y=0
+W (13808) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (13808) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (14808) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (14808) t_CST726: 00 00 02 00 00 00 01
+E (14818) i2c.master: I2C transaction timeout detected
+I (15348) t_CST726: STATUS reads=1002 errors=13503 changes=12 no_data=9515 IRQ_edges=16812 INT=1
+W (15808) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (15808) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (16088) t_CST726: 00 00 02 40 29 17 27
+I (16088) t_CST726: RELEASE x=41 y=5927 [outside 240x320; raw coordinates preserved]
+I (16538) t_CST726: 00 00 02 80 00 00 00
+I (16538) t_CST726: TOUCH x=0 y=0
+I (16798) t_CST726: 00 00 01 80 1f 00 00
+I (16798) t_CST726: TOUCH x=31 y=0
+I (16808) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (16808) t_CST726: 00 00 00 00 00 00 00
+I (17808) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (17808) t_CST726: 00 00 00 ff ff ff ff
+I (18088) t_CST726: 00 00 01 80 00 00 00
+I (18088) t_CST726: TOUCH x=0 y=0
+I (18808) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (18808) t_CST726: 69 21 a9 32 15 35 ad
+W (19808) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (19808) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (20118) t_CST726: 00 00 01 80 00 00 3e
+I (20118) t_CST726: TOUCH x=0 y=62
+I (20348) t_CST726: STATUS reads=1414 errors=19623 changes=17 no_data=12454 IRQ_edges=16882 INT=1
+W (20808) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (20808) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (21078) t_CST726: 00 00 01 80 26 01 36
+I (21078) t_CST726: TOUCH x=38 y=310
+I (21378) t_CST726: 00 00 01 80 00 00 00
+I (21378) t_CST726: TOUCH x=0 y=0
+I (21838) t_CST726: 00 00 01 80 01 ff ff
+I (21838) t_CST726: TOUCH x=1 y=65535 [outside 240x320; raw coordinates preserved]
+W (21838) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (21838) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (22838) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (22838) t_CST726: 00 00 00 ff ff ff ff
+I (23148) t_CST726: 00 00 01 80 a0 00 e7
+I (23148) t_CST726: TOUCH x=160 y=231
+I (23838) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (23838) t_CST726: 00 00 00 ff ff ff ff
+I (24848) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (24848) t_CST726: 00 00 00 ff ff ff ff
+I (25348) t_CST726: STATUS reads=1813 errors=25794 changes=21 no_data=15406 IRQ_edges=16910 INT=1
+I (25848) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (25848) t_CST726: 00 00 00 ff ff ff ff
+I (26528) t_CST726: 00 00 01 80 d0 00 00
+I (26528) t_CST726: TOUCH x=208 y=0
+E (26618) i2c.master: I2C transaction timeout detected
+E (26618) i2c.master: I2C transaction timeout detected
+E (26628) i2c.master: I2C transaction timeout detected
+E (26638) i2c.master: I2C transaction timeout detected
+E (26638) i2c.master: I2C transaction timeout detected
+E (26648) i2c.master: I2C transaction timeout detected
+E (26658) i2c.master: I2C transaction timeout detected
+E (26658) i2c.master: I2C transaction timeout detected
+E (26668) i2c.master: I2C transaction timeout detected
+E (26678) i2c.master: I2C transaction timeout detected
+E (26678) i2c.master: I2C transaction timeout detected
+E (26688) i2c.master: I2C transaction timeout detected
+E (26698) i2c.master: I2C transaction timeout detected
+E (26698) i2c.master: I2C transaction timeout detected
+E (26708) i2c.master: I2C transaction timeout detected
+E (26718) i2c.master: I2C transaction timeout detected
+E (26728) i2c.master: I2C transaction timeout detected
+E (26728) i2c.master: I2C transaction timeout detected
+E (26738) i2c.master: I2C transaction timeout detected
+E (26748) i2c.master: I2C transaction timeout detected
+E (26748) i2c.master: I2C transaction timeout detected
+E (26758) i2c.master: I2C transaction timeout detected
+E (26768) i2c.master: I2C transaction timeout detected
+E (26768) i2c.master: I2C transaction timeout detected
+E (26778) i2c.master: I2C transaction timeout detected
+E (26788) i2c.master: I2C transaction timeout detected
+E (26788) i2c.master: I2C transaction timeout detected
+E (26798) i2c.master: I2C transaction timeout detected
+E (26808) i2c.master: I2C transaction timeout detected
+E (26808) i2c.master: I2C transaction timeout detected
+E (26818) i2c.master: I2C transaction timeout detected
+E (26828) i2c.master: I2C transaction timeout detected
+E (26828) i2c.master: I2C transaction timeout detected
+E (26838) i2c.master: I2C transaction timeout detected
+E (26848) i2c.master: I2C transaction timeout detected
+W (26848) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (26848) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (26858) i2c.master: I2C transaction timeout detected
+E (26858) i2c.master: I2C transaction timeout detected
+E (26958) i2c.master: I2C transaction timeout detected
+E (27558) i2c.master: I2C transaction timeout detected
+E (27658) i2c.master: I2C transaction timeout detected
+W (27858) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (27858) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (27858) i2c.master: I2C transaction timeout detected
+E (27958) i2c.master: I2C transaction timeout detected
+E (28258) i2c.master: I2C transaction timeout detected
+E (28358) i2c.master: I2C transaction timeout detected
+E (28458) i2c.master: I2C transaction timeout detected
+W (28858) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (28858) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (28858) i2c.master: I2C transaction timeout detected
+E (28958) i2c.master: I2C transaction timeout detected
+E (29058) i2c.master: I2C transaction timeout detected
+E (29558) i2c.master: I2C transaction timeout detected
+W (29858) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (29858) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (29858) i2c.master: I2C transaction timeout detected
+E (29958) i2c.master: I2C transaction timeout detected
+I (30358) t_CST726: STATUS reads=1818 errors=28367 changes=22 no_data=16099 IRQ_edges=17486 INT=1
+E (30358) i2c.master: I2C transaction timeout detected
+W (30858) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (30858) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+E (30858) i2c.master: I2C transaction timeout detected
+E (30958) i2c.master: I2C transaction timeout detected
+I (31798) t_CST726: 00 00 01 80 56 00 00
+I (31798) t_CST726: TOUCH x=86 y=0
+I (31858) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (31858) t_CST726: 00 00 00 ff ff ff ff
+I (32728) t_CST726: 00 00 01 80 74 00 00
+I (32728) t_CST726: TOUCH x=116 y=0
+I (32858) t_CST726: No valid 0x80/0x40 state; raw packet:
+I (32858) t_CST726: 00 00 00 ff ff ff ff
+I (33478) t_CST726: 00 00 01 80 ff 00 00
+I (33478) t_CST726: TOUCH x=255 y=0 [outside 240x320; raw coordinates preserved]
+E (33508) i2c.master: I2C transaction timeout detected
+W (33858) t_CST726: I2C stage=command 00 00: ESP_ERR_INVALID_STATE (0x103; not a release)
+W (33858) t_CST726: Bus snapshot: SDA=1 SCL=1 RST=1 INT=1
+I (34838) t_CST726: 00 00 01 80 38 48 b2
+I (34838) t_CST726: TOUCH x=56 y=18610 [outside 240x320; raw coordinates preserved]

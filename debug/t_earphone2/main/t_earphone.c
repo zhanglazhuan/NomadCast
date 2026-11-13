@@ -6,16 +6,8 @@
  *   2. PCNT 检测 MCLK 是否输出了
  *   3. ES8156 寄存器 dump (播放前后对比)
  *
- * === Leisound V1 Pins (耳机通道) ===
- *   EN_PWR   = GPIO46   全板外设电源
- *   AMP_EN   = GPIO43   耳机检测 (输入, 高有效)
- *   AP_EN    = GPIO21   喇叭功放使能 (耳机播放时拉低)
- *   I2C SDA  = GPIO47
- *   I2C SCL  = GPIO48
- *   I2S MCLK = GPIO4    (ESP32 输出 MCLK)
- *   I2S BCLK = GPIO5
- *   I2S LRCLK= GPIO6
- *   I2S DIN  = GPIO7
+ * PCB V1.2: pins come from nomadcast.h.
+ * ES8156 headphone DAC; HT6872 speaker amplifier remains disabled.
  */
 
 #include <stdio.h>
@@ -30,20 +22,21 @@
 #include "driver/gpio.h"
 #include "driver/pulse_cnt.h"
 #include "es8156.h"
+#include "nomadcast.h"
+#include "esp_timer.h"
 
 static const char *TAG = "diag";
 
-#define PIN_EN_POWER     GPIO_NUM_46
-#define PIN_AMP_EN       GPIO_NUM_18  // 耳机检测 (输入)
-#define PIN_I2C_SDA      GPIO_NUM_38
-#define PIN_I2C_SCL      GPIO_NUM_45
-#define PIN_I2S_MCLK     GPIO_NUM_1
-#define PIN_I2S_BCLK     GPIO_NUM_2
-#define PIN_I2S_LRCLK    GPIO_NUM_41
-#define PIN_I2S_DIN      GPIO_NUM_42
-#define PIN_AP_EN        GPIO_NUM_44
-
-#define ES8156_ADDR      0x08
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_AMP_EN NOMADCAST_PIN_HP_DETECT
+#define PIN_I2C_SDA NOMADCAST_PIN_I2C_SDA
+#define PIN_I2C_SCL NOMADCAST_PIN_I2C_SCL
+#define PIN_I2S_MCLK NOMADCAST_PIN_I2S_MCLK
+#define PIN_I2S_BCLK NOMADCAST_PIN_I2S_BCLK
+#define PIN_I2S_LRCLK NOMADCAST_PIN_I2S_WS
+#define PIN_I2S_DOUT NOMADCAST_PIN_I2S_DOUT
+#define PIN_AP_EN NOMADCAST_PIN_AMP_EN
+#define ES8156_ADDR NOMADCAST_ES8156_ADDR
 #define SAMPLE_RATE      44100
 
 static i2c_master_bus_handle_t i2c_bus;
@@ -53,28 +46,16 @@ static i2s_chan_handle_t       i2s_tx;
 /* ---- I2C scan ---- */
 static void i2c_scan(void)
 {
-    ESP_LOGI(TAG, "=== I2C Bus Scan (0x01-0x7F) ===");
+    ESP_LOGI(TAG, "=== I2C address probe (0x08-0x77; no register commands) ===");
     int found = 0;
-    for (uint8_t addr = 1; addr < 128; addr++) {
-        i2c_device_config_t d = {.dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = addr, .scl_speed_hz = 100000};
-        i2c_master_dev_handle_t dev;
-        if (i2c_master_bus_add_device(i2c_bus, &d, &dev) == ESP_OK) {
-            uint8_t dummy;
-            if (i2c_master_receive(dev, &dummy, 1, 100) == ESP_OK) {
-                /* 读 Chip ID (0xFD/0xFE) */
-                uint8_t id[2] = {0};
-                uint8_t reg = 0xFD;
-                if (i2c_master_transmit_receive(dev, &reg, 1, id, 2, 100) == ESP_OK) {
-                    ESP_LOGI(TAG, "  [0x%02X] ChipID=0x%02X%02X", addr, id[0], id[1]);
-                } else {
-                    ESP_LOGI(TAG, "  [0x%02X] (no chip ID read)", addr);
-                }
-                found++;
-            }
-            i2c_master_bus_rm_device(dev);
+    for (uint8_t addr = 8; addr < 0x78; ++addr) {
+        if (i2c_master_probe(i2c_bus, addr, 100) == ESP_OK) {
+            ESP_LOGI(TAG, "  ACK at 0x%02X", addr);
+            ++found;
         }
     }
-    ESP_LOGI(TAG, "Total devices: %d", found);
+    ESP_LOGI(TAG, "Total ACK addresses: %d", found);
+    ESP_ERROR_CHECK(i2c_master_bus_reset(i2c_bus));
 }
 
 /* ---- MCLK detect via PCNT ---- */
@@ -85,6 +66,7 @@ static void check_mclk(void)
     pcnt_unit_config_t unit_cfg = {
         .low_limit = -32768,
         .high_limit = 32767,
+        .flags.accum_count = true,
     };
     pcnt_unit_handle_t pcnt_unit = NULL;
     ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &pcnt_unit));
@@ -92,20 +74,25 @@ static void check_mclk(void)
     pcnt_chan_config_t chan_cfg = {
         .edge_gpio_num = PIN_I2S_MCLK,
         .level_gpio_num = -1,
+        .flags.io_loop_back = true,
     };
     pcnt_channel_handle_t pcnt_chan = NULL;
     ESP_ERROR_CHECK(pcnt_new_channel(pcnt_unit, &chan_cfg, &pcnt_chan));
 
     /* 上升沿计数 */
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(pcnt_chan, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_unit, 32767));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(pcnt_unit, -32768));
     ESP_ERROR_CHECK(pcnt_unit_enable(pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_clear_count(pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_start(pcnt_unit));
 
-    vTaskDelay(pdMS_TO_TICKS(100));  // 等 100ms
+    int64_t started = esp_timer_get_time();
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     int count = 0;
     ESP_ERROR_CHECK(pcnt_unit_get_count(pcnt_unit, &count));
+    int64_t elapsed = esp_timer_get_time() - started;
     ESP_ERROR_CHECK(pcnt_unit_stop(pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_disable(pcnt_unit));
     pcnt_del_channel(pcnt_chan);
@@ -113,7 +100,7 @@ static void check_mclk(void)
 
     /* 11.2896MHz * 0.1s = ~1,128,960 pulses */
     if (count > 1000) {
-        ESP_LOGI(TAG, "MCLK OK! PCNT=%d (~%.1f MHz)", count, count / 100000.0);
+        ESP_LOGI(TAG, "MCLK OK! PCNT=%d (~%.1f MHz)", count, (double)count / elapsed);
     } else {
         ESP_LOGE(TAG, "MCLK DEAD! PCNT=%d — no clock on IO%d", count, PIN_I2S_MCLK);
     }
@@ -132,35 +119,29 @@ static void dump_all_regs(const char *label)
         }
     }
     /* Chip ID */
-    uint8_t id[2] = {0};
-    es8156_read_reg(es8156, 0xFD, &id[0]);
-    es8156_read_reg(es8156, 0xFE, &id[1]);
-    es8156_read_reg(es8156, 0xFF, &id[0]);  // reuse id[0] for version
-    ESP_LOGI(TAG, "  ChipID=0x%02X%02X Ver=0x%02X", id[0], id[1], (int)id[0]);
+    uint16_t id;
+    uint8_t version;
+    ESP_ERROR_CHECK(es8156_read_chip_id(es8156, &id));
+    ESP_ERROR_CHECK(es8156_read_reg(es8156, 0xFF, &version));
+    ESP_LOGI(TAG, "  ChipID=0x%04X Ver=0x%02X", id, version);
 }
 
 /* ---- Main ---- */
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== ES8156 Diagnostic ===");
-
-    /* 功放使能 — 尝试 HIGH (耳机通路可能经过功放) */
-    gpio_set_direction(PIN_AP_EN, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_AP_EN, 0);  // 之前是 0, 试试 1
-
-    /* Power */
-    gpio_set_direction(PIN_EN_POWER, GPIO_MODE_OUTPUT);
-    gpio_set_level(PIN_EN_POWER, 1);
+    ESP_LOGI(TAG, "=== ES8156 Diagnostic / PCB V1.2 ===");
+    ESP_ERROR_CHECK(gpio_set_direction(PIN_AP_EN, GPIO_MODE_INPUT_OUTPUT));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_AP_EN, 0));
+    ESP_ERROR_CHECK(gpio_set_direction(PIN_EN_POWER, GPIO_MODE_INPUT_OUTPUT));
+    ESP_ERROR_CHECK(gpio_set_level(PIN_EN_POWER, 1));
+    ESP_ERROR_CHECK(gpio_set_direction(PIN_AMP_EN, GPIO_MODE_INPUT));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(PIN_AMP_EN, GPIO_FLOATING));
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // 耳机使能 — 尝试主动输出 HIGH (可能是耳机通路开关)
-    gpio_set_direction(PIN_AMP_EN, GPIO_MODE_INPUT);
-    // gpio_set_level(PIN_AMP_EN, 1);
-    ESP_LOGI(TAG, "AMP_EN(43) driven HIGH for headphone path");
-    // ESP_LOGI(TAG, "HW: EN_POWER(46)=HIGH  AMP_EN(43)=%d  AP_EN(21)=LOW", hp_plugged);
-    // if (!hp_plugged) {
-    //     ESP_LOGW(TAG, "Headphone NOT detected on AMP_EN(43)!  Check wiring.");
-    // }
+    ESP_LOGI(TAG, "POWER=%d AP_EN(GPIO%d)=%d HP_DETECT(GPIO%d)=%d",
+             gpio_get_level(PIN_EN_POWER), PIN_AP_EN, gpio_get_level(PIN_AP_EN),
+             PIN_AMP_EN, gpio_get_level(PIN_AMP_EN));
+    ESP_LOGI(TAG, "I2C SDA=%d SCL=%d; I2S MCLK=%d BCLK=%d LRCLK=%d DOUT=%d",
+             PIN_I2C_SDA, PIN_I2C_SCL, PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_LRCLK, PIN_I2S_DOUT);
 
     /* I2C */
     i2c_master_bus_config_t bus_cfg = {
@@ -178,17 +159,17 @@ void app_main(void)
     if (es8156_initialize(&cfg, &es8156) != ESP_OK) { ESP_LOGE(TAG, "ES8156 init FAIL"); goto end; }
 
     uint16_t cid;
-    es8156_read_chip_id(es8156, &cid);
+    ESP_ERROR_CHECK(es8156_read_chip_id(es8156, &cid));
     ESP_LOGI(TAG, "ES8156 Chip ID: 0x%04X", cid);
 
     /* Dump before configure */
     dump_all_regs("BEFORE config");
 
-    es8156_configure(es8156);  // DACHPModeOn=1 headphone mode (main2 ref)
+    ESP_ERROR_CHECK(es8156_configure(es8156));  // DACHPModeOn=1 headphone mode (main2 ref)
 
     dump_all_regs("AFTER config");
 
-    /* 3. I2S (外部 MCLK 输入, 256fs) */
+    /* 3. I2S master supplies MCLK at 256fs to ES8156. */
     i2s_chan_config_t ch = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     ch.auto_clear = true;
     ESP_ERROR_CHECK(i2s_new_channel(&ch, &i2s_tx, NULL));
@@ -197,10 +178,10 @@ void app_main(void)
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE), 
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-            .mclk = PIN_I2S_MCLK,  // GPIO4 — ESP32 输出 MCLK 给 ES8156
+            .mclk = PIN_I2S_MCLK,  // ESP32 supplies MCLK to ES8156
             .bclk = PIN_I2S_BCLK,
             .ws = PIN_I2S_LRCLK,
-            .dout = PIN_I2S_DIN,
+            .dout = PIN_I2S_DOUT,
             .din = I2S_GPIO_UNUSED,
         },
     };
@@ -213,7 +194,8 @@ void app_main(void)
     /* Write silence */
     int16_t sil[512] = {0};
     size_t bw;
-    i2s_channel_write(i2s_tx, sil, sizeof(sil), &bw, portMAX_DELAY);
+    ESP_ERROR_CHECK(i2s_channel_write(i2s_tx, sil, sizeof(sil), &bw, 1000));
+    ESP_ERROR_CHECK(bw == sizeof(sil) ? ESP_OK : ESP_FAIL);
     ESP_LOGI(TAG, "I2S enabled, MCLK output on IO%d, silence preloaded", PIN_I2S_MCLK);
 
     /* 4. Check MCLK */
@@ -232,8 +214,9 @@ void app_main(void)
         int loop = 0;
         while (1) {
             size_t bw;
-            i2s_channel_write(i2s_tx, buf, sizeof(buf), &bw, portMAX_DELAY);
-            if (++loop % 100 == 0) ESP_LOGI(TAG, "Beep loop %d", loop);
+            ESP_ERROR_CHECK(i2s_channel_write(i2s_tx, buf, sizeof(buf), &bw, 1000));
+            ESP_ERROR_CHECK(bw == sizeof(buf) ? ESP_OK : ESP_FAIL);
+            if (++loop % 4000 == 0) ESP_LOGI(TAG, "Beep loop %d", loop);
         }
     }
 

@@ -21,8 +21,8 @@ extern "C" {
 /** Initialize audio hardware (I2C, ES8156, I2S). Call once at boot. */
 bool audio_player_init(void);
 
-/** Attach the ES8156 codec on the shared hardware I2C bus (created by GT911)
- *  and apply the saved volume. Call once at boot, after gt911_init(). */
+/** Attach the ES8156 codec on the shared hardware I2C bus (created by main)
+ *  and apply the saved volume. Call once at boot, after shared bus initialization. */
 void audio_player_codec_init(i2c_master_bus_handle_t i2c_bus);
 
 /** Start headphone jack-detect monitoring (AMP_EN GPIO18 → AP_EN GPIO44).

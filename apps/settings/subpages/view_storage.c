@@ -11,9 +11,74 @@
 #include "../model.h"
 #include "lv_page.h"
 #include "lang.h"
+#include "usb_storage.h"
 
 extern SettingsApp g_settings_app;
 extern const lv_font_t *g_cjk_font;
+
+typedef struct {
+    lv_obj_t *section;
+    lv_obj_t *hint;
+    lv_obj_t *sw;
+    lv_timer_t *timer;
+} storage_usb_ctx_t;
+
+static void refresh_usb(lv_timer_t *timer)
+{
+    storage_usb_ctx_t *ctx = lv_timer_get_user_data(timer);
+    if (usb_storage_connected()) lv_obj_remove_flag(ctx->section, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ctx->section, LV_OBJ_FLAG_HIDDEN);
+    if (usb_storage_enabled()) lv_obj_add_state(ctx->sw, LV_STATE_CHECKED);
+    else lv_obj_remove_state(ctx->sw, LV_STATE_CHECKED);
+    if (usb_storage_busy() || !usb_storage_has_card()) lv_obj_add_state(ctx->sw, LV_STATE_DISABLED);
+    else lv_obj_remove_state(ctx->sw, LV_STATE_DISABLED);
+    lv_label_set_text(ctx->hint, tr(usb_storage_busy() ? STR_USB_SWITCHING :
+                                   usb_storage_last_error() != ESP_OK ? STR_USB_FAILED : STR_USB_HINT));
+}
+
+static void delete_usb_ctx(lv_event_t *e)
+{
+    storage_usb_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx->timer) lv_timer_delete(ctx->timer);
+    lv_free(ctx);
+}
+
+static void toggle_usb(lv_event_t *e)
+{
+    storage_usb_ctx_t *ctx = lv_event_get_user_data(e);
+    bool enabled = lv_obj_has_state(ctx->sw, LV_STATE_CHECKED);
+    usb_storage_set_enabled(enabled);
+    refresh_usb(ctx->timer);
+}
+
+static void build_usb_controls(lv_obj_t *screen, lv_obj_t *cont)
+{
+    storage_usb_ctx_t *ctx = lv_malloc_zeroed(sizeof(*ctx));
+    if (!ctx) return;
+    ctx->section = lv_obj_create(cont);
+    lv_obj_remove_style_all(ctx->section);
+    lv_obj_set_size(ctx->section, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(ctx->section, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(ctx->section, 8, 0);
+    lv_obj_t *row = lv_obj_create(ctx->section);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_PCT(100), 40);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *title = lv_label_create(row);
+    lv_label_set_text(title, tr(STR_USB_DISK));
+    lv_obj_set_style_text_font(title, g_cjk_font, 0);
+    ctx->sw = lv_switch_create(row);
+    lv_obj_add_event_cb(ctx->sw, toggle_usb, LV_EVENT_VALUE_CHANGED, ctx);
+    /* Reminder lives directly below the switch row. No connection-status label. */
+    ctx->hint = lv_label_create(ctx->section);
+    lv_obj_set_width(ctx->hint, LV_PCT(100));
+    lv_obj_set_style_text_font(ctx->hint, g_cjk_font, 0);
+    lv_obj_set_style_text_color(ctx->hint, lv_color_hex(0x888888), 0);
+    ctx->timer = lv_timer_create(refresh_usb, 250, ctx);
+    lv_obj_add_event_cb(screen, delete_usb_ctx, LV_EVENT_DELETE, ctx);
+    refresh_usb(ctx->timer);
+}
 
 /* ── 清理按钮回调 ──────────────────────────────────────────────────────────── */
 
@@ -39,11 +104,13 @@ static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
 
     /* ── No SD card ── */
     if (used < 0 || total <= 0) {
-        lv_obj_t* lb = lv_label_create(cont);
-        lv_label_set_text(lb, tr(STR_NO_SD_CARD));
-        lv_obj_set_style_text_font(lb, g_cjk_font, 0);
-        lv_obj_set_style_text_color(lb, lv_color_hex(0x999999), 0);
-        lv_obj_align(lb, LV_ALIGN_CENTER, 0, 0);
+        if (!usb_storage_has_card()) {
+            lv_obj_t* lb = lv_label_create(cont);
+            lv_label_set_text(lb, tr(STR_NO_SD_CARD));
+            lv_obj_set_style_text_font(lb, g_cjk_font, 0);
+            lv_obj_set_style_text_color(lb, lv_color_hex(0x999999), 0);
+        }
+        build_usb_controls(page.screen, cont);
         return page.screen;
     }
 
@@ -86,6 +153,7 @@ static lv_obj_t* build_storage_page(struct SettingsApp* app, void* user_data) {
     lv_obj_add_event_cb(btn, on_clean_clicked, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
 
+    build_usb_controls(page.screen, cont);
     return page.screen;
 }
 

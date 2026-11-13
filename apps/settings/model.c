@@ -360,10 +360,12 @@ bool settings_model_get_and_clear_pending_connect(struct SettingsApp* app, char*
 
 /* ── Storage ───────────────────────────────────────────────────────────────── */
 
+#include "usb_storage.h"
 #include "ff.h"  /* FatFS f_getfree */
 
 int settings_model_get_storage_used_mb(struct SettingsApp* app) {
     (void)app;
+    if (!usb_storage_local_available()) return -1;
     FATFS *fs = NULL;
     DWORD free_clst = 0;
     /* FatFS drive "0:" = first mounted volume (SD card at /sdcard) */
@@ -377,6 +379,7 @@ int settings_model_get_storage_used_mb(struct SettingsApp* app) {
 
 int settings_model_get_storage_total_mb(struct SettingsApp* app) {
     (void)app;
+    if (!usb_storage_local_available()) return -1;
     FATFS *fs = NULL;
     DWORD free_clst = 0;
     FRESULT res = f_getfree("0:/", &free_clst, &fs);

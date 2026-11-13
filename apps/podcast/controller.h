@@ -236,4 +236,8 @@ rss_feed_t *g_rss_result(void);
 int g_rss_channel_id(void);
 void controller_rss_reparse(int offset, int limit);
 
+/* Runtime USB storage ownership transfer. Call on the LVGL thread. */
+void podcast_controller_suspend_storage(void);
+void podcast_controller_restore_storage(void);
+
 #endif /* PODCAST_CONTROLLER_H */

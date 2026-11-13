@@ -1,25 +1,5 @@
-/*
- * NomadCast — TDP Power Consumption Test (t_TDP)
- *
- * Three test modes, selected by the TDP_MODE macro:
- *
- *   TDP_MODE_DOWNLOAD — WiFi download cycling (radio + SD writes)
- *   TDP_MODE_SCREEN   — display always-on (SPI + backlight)
- *   TDP_MODE_AUDIO    — loop playback of /sdcard/test.m4a via speaker
- *
- * Every INTERVAL_MIN minutes, a timestamp + battery voltage is appended
- * to /sdcard/tdp_log.csv.  The test runs until the battery is exhausted.
- * Read the CSV file from the SD card afterwards to determine runtime.
- *
- * === Leisound V1 Pins ===
- *   EN_POWER    GPIO46    board peripheral power
- *   SD CLK/CMD/D0  GPIO1/14/2   SDMMC 1-bit
- *   LCD SPI     GPIO10/11/12/13/45  CS/MOSI/SCK/MISO/DC
- *   LCD RST     GPIO8     shared with touch reset
- *   BAT ADC     ADC1_CH2 (GPIO3)  x2 voltage divider
- *   I2S BCK/WS/DOUT  GPIO5/6/7
- *   AMP_EN      GPIO21    HT6872 amp enable (verified in audio_player.c)
- */
+#include "nomadcast.h"
+/* PCB V1.2 wiring: nomadcast.h. Power consumption test. */
 
 #include <stdio.h>
 #include <string.h>
@@ -69,16 +49,16 @@ static const char *TAG = "t_tdp";
 
 /* ── Board pins ─────────────────────────────────────────────────────────── */
 
-#define PIN_EN_POWER    GPIO_NUM_46
-#define PIN_SD_CLK      GPIO_NUM_1
-#define PIN_SD_CMD      GPIO_NUM_14
-#define PIN_SD_DAT0     GPIO_NUM_2
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_SD_CLK NOMADCAST_PIN_SD_CLK
+#define PIN_SD_CMD NOMADCAST_PIN_SD_CMD
+#define PIN_SD_DAT0 NOMADCAST_PIN_SD_DAT0
 #define PIN_SD_MOUNT    "/sdcard"
 
 /* Battery ADC (same as sys/battery_monitor/battery.c) */
-#define BAT_ADC_UNIT    ADC_UNIT_1
-#define BAT_ADC_CHANNEL ADC_CHANNEL_2       /* GPIO3 */
-#define BAT_DIVIDER     2
+#define BAT_ADC_UNIT NOMADCAST_BAT_ADC_UNIT
+#define BAT_ADC_CHANNEL NOMADCAST_BAT_ADC_CHANNEL
+#define BAT_DIVIDER NOMADCAST_BAT_DIVIDER
 #define BAT_SAMPLES     16
 
 /* ── Download mode ──────────────────────────────────────────────────────── */
@@ -103,14 +83,14 @@ static const char *TAG = "t_tdp";
 #include "esp_lcd_panel_st7789.h"
 #include "driver/spi_master.h"
 
-#define PIN_LCD_CS      GPIO_NUM_10
-#define PIN_LCD_DC      GPIO_NUM_45
-#define PIN_LCD_RST     GPIO_NUM_8
-#define PIN_SPI_SCK     GPIO_NUM_12
-#define PIN_SPI_MOSI    GPIO_NUM_11
-#define PIN_SPI_MISO    GPIO_NUM_13
+#define PIN_LCD_CS NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST NOMADCAST_PIN_LCD_RST
+#define PIN_SPI_SCK NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO NOMADCAST_PIN_SPI_MISO
 #define SPI_HOST_ID     SPI2_HOST
-#define SPI_FREQ_HZ     (40 * 1000 * 1000)
+#define SPI_FREQ_HZ     (20 * 1000 * 1000)
 #define LCD_W           240
 #define LCD_H           320
 
@@ -126,16 +106,16 @@ static const char *TAG = "t_tdp";
 #include "aac_decoder.h"
 #include "board_pins_config.h"
 
-#define PIN_AMP_EN      GPIO_NUM_21    /* HT6872 amp */
+#define PIN_AMP_EN NOMADCAST_PIN_AMP_EN
 #define AUDIO_FILE      "/sdcard/test.m4a"
 
 /* ADF custom board: provide I2S pins to i2s_stream element */
 esp_err_t get_i2s_pins(int port, board_i2s_pin_t *cfg)
 {
     (void)port;
-    cfg->bck_io_num   = GPIO_NUM_5;
-    cfg->ws_io_num    = GPIO_NUM_6;
-    cfg->data_out_num = GPIO_NUM_7;
+    cfg->bck_io_num   = NOMADCAST_PIN_I2S_BCLK;
+    cfg->ws_io_num    = NOMADCAST_PIN_I2S_WS;
+    cfg->data_out_num = NOMADCAST_PIN_I2S_DOUT;
     cfg->data_in_num  = I2S_GPIO_UNUSED;
     cfg->mck_io_num   = I2S_GPIO_UNUSED;
     return ESP_OK;
@@ -455,6 +435,14 @@ static bool screen_init(void)
     /* Power on then hardware reset the LCD */
     gpio_config_t rst = { .pin_bit_mask = BIT64(PIN_LCD_RST), .mode = GPIO_MODE_OUTPUT };
     gpio_config(&rst);
+    gpio_config_t lcd_power = {
+        .pin_bit_mask = BIT64(NOMADCAST_PIN_LCD_POWER) | BIT64(NOMADCAST_PIN_LCD_BL),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&lcd_power));
+    ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_LCD_POWER, 1));
+    ESP_ERROR_CHECK(gpio_set_level(NOMADCAST_PIN_LCD_BL, 1));
+    vTaskDelay(pdMS_TO_TICKS(100));
     gpio_set_level(PIN_LCD_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(PIN_LCD_RST, 1);

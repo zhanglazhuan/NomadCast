@@ -71,6 +71,9 @@ static void on_app_event(app_event_t event, const void *data)
 
 void log_capture_init(void)
 {
+    static bool registered;
+    if (registered) return;
+    registered = true;
     app_event_register(on_app_event);
     ESP_LOGI(TAG, "auto-capture registered (app_event listener)");
 }

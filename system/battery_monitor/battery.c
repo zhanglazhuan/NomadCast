@@ -15,13 +15,13 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_log.h"
 #include "esp_err.h"
-#include "nomadcast_v1.h"
+#include "nomadcast.h"
 
 static const char *TAG = "battery";
 
 #define PIN_CHAG        NOMADCAST_BAT_CHG_PIN
 #define BAT_ADC_UNIT    NOMADCAST_BAT_ADC_UNIT
-#define BAT_ADC_CHANNEL NOMADCAST_BAT_ADC_CHANNEL   /* GPIO8 on ESP32-S3 */
+#define BAT_ADC_CHANNEL NOMADCAST_BAT_ADC_CHANNEL   /* GPIO3 on PCB V1.2 */
 #define BAT_DIVIDER     NOMADCAST_BAT_DIVIDER
 #define BAT_SAMPLES     16
 #define BAT_PERIOD_MS   300000             /* 5 minutes */

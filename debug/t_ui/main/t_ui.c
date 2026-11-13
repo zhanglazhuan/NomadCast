@@ -1,3 +1,4 @@
+#include "nomadcast.h"
 /*
  * t_ui — Proven display init + LVGL (system malloc, no ADF, no custom pools)
  */
@@ -23,17 +24,17 @@
 
 static const char *TAG = "t_ui";
 
-#define PIN_EN_POWER    GPIO_NUM_46
-#define PIN_SPI_SCK     GPIO_NUM_12
-#define PIN_SPI_MOSI    GPIO_NUM_11
-#define PIN_SPI_MISO    GPIO_NUM_13
-#define PIN_LCD_CS      GPIO_NUM_10
-#define PIN_LCD_DC      GPIO_NUM_45
-#define PIN_LCD_RST     GPIO_NUM_8
-#define PIN_TP_INT      GPIO_NUM_18
-#define PIN_TP_RST      GPIO_NUM_8
-#define PIN_I2C_SDA     GPIO_NUM_47
-#define PIN_I2C_SCL     GPIO_NUM_48
+#define PIN_EN_POWER NOMADCAST_PIN_AP_POWER
+#define PIN_SPI_SCK NOMADCAST_PIN_SPI_SCK
+#define PIN_SPI_MOSI NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO NOMADCAST_PIN_SPI_MISO
+#define PIN_LCD_CS NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC NOMADCAST_PIN_LCD_DC
+#define PIN_LCD_RST NOMADCAST_PIN_LCD_RST
+#define PIN_TP_INT NOMADCAST_PIN_TP_INT
+#define PIN_TP_RST NOMADCAST_PIN_TP_RST
+#define PIN_I2C_SDA NOMADCAST_PIN_I2C_SDA
+#define PIN_I2C_SCL NOMADCAST_PIN_I2C_SCL
 #define LCD_W           240
 #define LCD_H           320
 #define LCD_BUF_SIZE    (LCD_W * LCD_H * sizeof(uint16_t))
@@ -213,8 +214,10 @@ void app_main(void)
     ESP_LOGI(TAG, "=== t_ui: LVGL on proven base ===");
 
     /* 1. Power */
-    gpio_config_t pwr = { .pin_bit_mask = BIT64(PIN_EN_POWER), .mode = GPIO_MODE_OUTPUT };
+    gpio_config_t pwr = { .pin_bit_mask = BIT64(PIN_EN_POWER) | BIT64(NOMADCAST_PIN_LCD_POWER) | BIT64(NOMADCAST_PIN_LCD_BL), .mode = GPIO_MODE_OUTPUT };
     gpio_config(&pwr); gpio_set_level(PIN_EN_POWER, 1);
+    gpio_set_level(NOMADCAST_PIN_LCD_POWER, 1);
+    gpio_set_level(NOMADCAST_PIN_LCD_BL, 1);
     vTaskDelay(pdMS_TO_TICKS(100));
 
     /* 2. HW reset */
