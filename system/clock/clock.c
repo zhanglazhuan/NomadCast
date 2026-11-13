@@ -13,15 +13,9 @@
 
 static const char *TAG = "clock";
 
-/* ── Timezone mapping (POSIX TZ strings — sign is inverted from UTC offset) ─ */
+/* ── Timezone (POSIX TZ string — sign is inverted from UTC offset) ────────── */
 
-static const char *s_tz_strings[] = {
-    "CST-8",     /* 0: UTC+8 Beijing  */
-    "GMT0",      /* 1: UTC+0 London   */
-    "EST+5",     /* 2: UTC-5 New York */
-    "JST-9",     /* 3: UTC+9 Tokyo    */
-};
-#define TZ_COUNT (sizeof(s_tz_strings) / sizeof(s_tz_strings[0]))
+#define DEFAULT_TZ "CST-8"   /* UTC+8 Beijing */
 
 /* ── State ────────────────────────────────────────────────────────────────── */
 
@@ -29,14 +23,15 @@ typedef struct {
     bool synced;
     bool fmt24;
     bool sntp_started;
-    int tz_idx;
+    char tz[32];
     int last_fired_minute;
     lv_timer_t *timer;
 } clock_state_t;
 
-static clock_state_t s_clock = { 
-    .fmt24 = true, 
-    .last_fired_minute = -1 
+static clock_state_t s_clock = {
+    .fmt24 = true,
+    .last_fired_minute = -1,
+    .tz = DEFAULT_TZ,
 };
 
 /* ── WiFi event → trigger SNTP sync ───────────────────────────────────────── */
@@ -87,8 +82,8 @@ static void clock_tick_cb(lv_timer_t *t)
 
 static void apply_timezone(void)
 {
-    if (s_clock.tz_idx >= 0 && s_clock.tz_idx < (int)TZ_COUNT) {
-        setenv("TZ", s_tz_strings[s_clock.tz_idx], 1);
+    if (s_clock.tz[0] != '\0') {
+        setenv("TZ", s_clock.tz, 1);
     }
     tzset();
 }
@@ -99,8 +94,8 @@ void clock_init(void)
 {
     /* Load saved timezone and format from flash so the correct settings
      * are active from boot, before the Settings app ever starts. */
-    s_clock.tz_idx = flash_get_i32("settings", "tz", 0);
-    s_clock.fmt24  = flash_get_bool("settings", "fmt24", true);
+    flash_get_str("settings", "tz", s_clock.tz, sizeof(s_clock.tz), DEFAULT_TZ);
+    s_clock.fmt24 = flash_get_bool("settings", "fmt24", true);
     apply_timezone();
 
     /* At boot, try SNTP sync immediately (may fail if no WiFi yet).
@@ -111,7 +106,7 @@ void clock_init(void)
     lv_timer_set_repeat_count(s_clock.timer, -1);
 
     ESP_LOGI(TAG, "Initialized (tz=%s, fmt=%s)",
-             s_tz_strings[s_clock.tz_idx], s_clock.fmt24 ? "24h" : "12h");
+             s_clock.tz, s_clock.fmt24 ? "24h" : "12h");
 }
 
 static void fire_immediate_tick(void)
@@ -125,13 +120,14 @@ static void fire_immediate_tick(void)
     app_event_fire(APP_EVENT_CLOCK_TICK, &data);
 }
 
-void clock_set_timezone(int tz_idx)
+void clock_set_timezone(const char *tz)
 {
-    if (tz_idx < 0 || tz_idx >= (int)TZ_COUNT) return;
-    s_clock.tz_idx = tz_idx;
+    if (!tz || tz[0] == '\0') return;
+    strncpy(s_clock.tz, tz, sizeof(s_clock.tz) - 1);
+    s_clock.tz[sizeof(s_clock.tz) - 1] = '\0';
     apply_timezone();
     fire_immediate_tick();
-    ESP_LOGI(TAG, "Timezone → %s", s_tz_strings[tz_idx]);
+    ESP_LOGI(TAG, "Timezone → %s", s_clock.tz);
 }
 
 void clock_set_format_24h(bool fmt24)

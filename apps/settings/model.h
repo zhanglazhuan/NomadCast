@@ -25,7 +25,7 @@ typedef struct {
 
 typedef struct SettingsModel {
     // General
-    int  timezone_idx;       // 0=UTC+8, 1=UTC+0, 2=UTC-5, ...
+    char timezone_tz[32];    // POSIX TZ string (e.g. "CST-8" = UTC+8)
     int  language_idx;       // 0=CN, 1=EN, ...
     bool time_format_24h;    // true=24h, false=12h
     int  sleep_timeout_min;  // 0=never, 1/2/5/10/15/30/60 minutes
@@ -53,10 +53,6 @@ typedef struct SettingsModel {
 
 /* ── 预定义选项 ────────────────────────────────────────────────────────────── */
 
-#define SETTINGS_TIMEZONE_COUNT 4
-extern const char* settings_timezone_labels[];
-extern const char* settings_timezone_options;
-
 #define SETTINGS_LANGUAGE_COUNT 2
 extern const char* settings_language_labels[];
 extern const char* settings_language_options;
@@ -68,8 +64,8 @@ void settings_model_deinit(struct SettingsApp* app);
 
 /* ── General ───────────────────────────────────────────────────────────────── */
 
-int  settings_model_get_timezone(struct SettingsApp* app);
-void settings_model_set_timezone(struct SettingsApp* app, int idx);
+const char* settings_model_get_timezone(struct SettingsApp* app);
+void settings_model_set_timezone(struct SettingsApp* app, const char *tz);
 int  settings_model_get_language(struct SettingsApp* app);
 void settings_model_set_language(struct SettingsApp* app, int idx);
 bool settings_model_get_time_format_24h(struct SettingsApp* app);

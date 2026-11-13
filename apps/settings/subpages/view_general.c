@@ -51,7 +51,13 @@ static void on_icon_size_changed(lv_event_t* e) {
 static void on_timezone_changed(lv_event_t* e) {
     lv_obj_t* dd = lv_event_get_target(e);
     int sel = lv_dropdown_get_selected(dd);
-    settings_model_set_timezone(&g_settings_app, sel);
+    /* The zone index is relative to the currently selected country, so resolve
+     * the country from flash and map the dropdown index back to a POSIX TZ. */
+    char cc[8];
+    flash_get_str("podcast", "country", cc, sizeof(cc), "cn");
+    int ci = country_index_of(cc);
+    if (ci < 0) ci = 0;
+    settings_model_set_timezone(&g_settings_app, country_timezone_tz_at(ci, sel));
 }
 
 /* ── 所在国家变更回调 ──────────────────────────────────────────────────────── */
@@ -61,7 +67,14 @@ static void on_country_changed(lv_event_t* e) {
     int sel = lv_dropdown_get_selected(dd);
     const char* code = country_code_at(sel);
     flash_set_str("podcast", "country", code);
+    /* Timezone follows the country: reset to this country's default zone, then
+     * rebuild the page so the timezone dropdown lists that country's zones.
+     * (Safe to rebuild here — the dropdown's event cb is attached after its
+     * initial selection, so the rebuild won't re-enter this callback.) */
+    settings_model_set_timezone(&g_settings_app, country_timezone_tz_at(sel, 0));
     app_event_fire(APP_EVENT_COUNTRY_CHANGED, NULL);
+    page_navigator_navigate_to(&g_settings_app.view->page_nav, &g_settings_app,
+                               SETTINGS_PAGE_GENERAL, NULL);
 }
 
 /* ── 睡眠超时选择回调 ────────────────────────────────────────────────────── */
@@ -247,7 +260,6 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     lv_obj_set_style_pad_ver(cont, 4, 0);
     lv_obj_set_style_pad_row(cont, 0, 0);
 
-    int tz = settings_model_get_timezone(app);
     int lang = settings_model_get_language(app);
     bool fmt24 = settings_model_get_time_format_24h(app);
 
@@ -267,14 +279,17 @@ static lv_obj_t* build_general_page(struct SettingsApp* app, void* user_data) {
     dropdown_set_cjk(dd_country);
     lv_obj_add_event_cb(dd_country, on_country_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* ── 时区 ── */
+    /* ── 时区 (跟随所在国家) ── */
+    const char *tz = settings_model_get_timezone(app);
+    int tz_zone = country_timezone_index_of_tz(country_idx, tz);
+    if (tz_zone < 0) tz_zone = 0;
+
     lv_obj_t* row_tz = create_setting_row(cont, tr(STR_TIMEZONE));
     lv_obj_t* dd_tz = lv_dropdown_create(row_tz);
-    char tz_opts[128];
-    snprintf(tz_opts, sizeof(tz_opts), "%s\n%s\n%s\n%s",
-             tr(STR_TZ_BEIJING), tr(STR_TZ_LONDON), tr(STR_TZ_NEW_YORK), tr(STR_TZ_TOKYO));
+    char tz_opts[256];
+    country_timezone_options_str(country_idx, tz_opts, sizeof(tz_opts));
     lv_dropdown_set_options(dd_tz, tz_opts);
-    lv_dropdown_set_selected(dd_tz, tz);
+    lv_dropdown_set_selected(dd_tz, tz_zone);
     lv_obj_set_width(dd_tz, LV_PCT(100));
     dropdown_set_cjk(dd_tz);
     lv_obj_add_event_cb(dd_tz, on_timezone_changed, LV_EVENT_VALUE_CHANGED, NULL);

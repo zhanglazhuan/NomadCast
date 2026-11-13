@@ -22,9 +22,6 @@ _Static_assert(sizeof(WifiNetwork) == sizeof(hal_wifi_ap_t),
 
 /* ── 预定义选项 ────────────────────────────────────────────────────────────── */
 
-const char* settings_timezone_labels[] = {"UTC+8 Beijing", "UTC+0 London", "UTC-5 New York", "UTC+9 Tokyo"};
-const char* settings_timezone_options = "UTC+8 Beijing\nUTC+0 London\nUTC-5 New York\nUTC+9 Tokyo";
-
 const char* settings_language_labels[] = {"简体中文", "English"};
 const char* settings_language_options = "简体中文\nEnglish";
 
@@ -39,7 +36,8 @@ void settings_model_init(struct SettingsApp* app) {
     memset(app->model, 0, sizeof(SettingsModel));
 
     // Defaults (overridden by NVS if saved values exist)
-    app->model->timezone_idx = flash_get_i32("settings", "tz", 0);
+    flash_get_str("settings", "tz", app->model->timezone_tz,
+                  sizeof(app->model->timezone_tz), "CST-8");
     app->model->language_idx = flash_get_i32("settings", "lang", CONFIG_NOMADCAST_DEFAULT_LANGUAGE);
     lang_set((lang_t)app->model->language_idx);   /* sync global (covers pc_demo without lang_init) */
     app->model->time_format_24h = flash_get_bool("settings", "fmt24", true);
@@ -61,7 +59,7 @@ void settings_model_init(struct SettingsApp* app) {
     sleep_monitor_set_auto_power_off_timeout(app->model->auto_power_off_min);
 
     /* Sync clock with loaded settings */
-    clock_set_timezone(app->model->timezone_idx);
+    clock_set_timezone(app->model->timezone_tz);
     clock_set_format_24h(app->model->time_format_24h);
 
     /* Restore WiFi state from hardware (survives app exit/re-enter) */
@@ -99,15 +97,16 @@ void settings_model_deinit(struct SettingsApp* app) {
 
 /* ── General ───────────────────────────────────────────────────────────────── */
 
-int settings_model_get_timezone(struct SettingsApp* app) {
-    return app->model ? app->model->timezone_idx : 0;
+const char* settings_model_get_timezone(struct SettingsApp* app) {
+    return app->model ? app->model->timezone_tz : "CST-8";
 }
-void settings_model_set_timezone(struct SettingsApp* app, int idx) {
-    if (!app->model) return;
-    app->model->timezone_idx = idx;
-    flash_set_i32("settings", "tz", idx);
-    clock_set_timezone(idx);
-    ESP_LOGI(TAG, "timezone set to %d",idx);
+void settings_model_set_timezone(struct SettingsApp* app, const char *tz) {
+    if (!app->model || !tz) return;
+    strncpy(app->model->timezone_tz, tz, sizeof(app->model->timezone_tz) - 1);
+    app->model->timezone_tz[sizeof(app->model->timezone_tz) - 1] = '\0';
+    flash_set_str("settings", "tz", app->model->timezone_tz);
+    clock_set_timezone(app->model->timezone_tz);
+    ESP_LOGI(TAG, "timezone set to %s", app->model->timezone_tz);
 }
 
 int settings_model_get_language(struct SettingsApp* app) {

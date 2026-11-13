@@ -25,8 +25,8 @@ void clock_init(void);
 
 /* ── Configuration (called by Settings model) ───────────────────────────── */
 
-/** Set timezone by index: 0=UTC+8, 1=UTC+0, 2=UTC-5, 3=UTC+9. */
-void clock_set_timezone(int tz_idx);
+/** Set timezone from a POSIX TZ string (e.g. "CST-8" = UTC+8). */
+void clock_set_timezone(const char *tz);
 
 /** Set 12h (false) or 24h (true) format. */
 void clock_set_format_24h(bool fmt24);
