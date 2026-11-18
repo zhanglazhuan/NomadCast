@@ -166,6 +166,7 @@ static void build_hint(lv_obj_t* parent, const char* msg, bool show_network_link
      * 文本测量)避免"未插入 SD 卡，无本地内容。"这类长提示被 200px 断成两行。 */
     lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_size(label, LV_PCT(100), 60);
+    lv_obj_set_style_pad_hor(label, 10, 0);   /* keep the hint off the screen edges */
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, show_network_link ? -24 : 0);
 

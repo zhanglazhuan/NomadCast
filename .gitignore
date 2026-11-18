@@ -22,6 +22,8 @@ server/debug/
 server/docs/
 server/downloads/
 server/firmware/*.bin
+server/venv/
+server/run/
 
 # ── Python artifacts ──
 __pycache__/

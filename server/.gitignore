@@ -1,0 +1,22 @@
+# ── Python 虚拟环境 ──
+venv/
+
+# ── Python 字节码 ──
+__pycache__/
+*.py[cod]
+
+# ── 运行时生成物 ──
+run/
+
+# ── 运行时目录 ──
+archive/
+debug/
+docs/
+downloads/
+
+# ── 固件二进制（版本文件保留在 firmware/ 下） ──
+firmware/*.bin
+
+# ── OS 垃圾文件 ──
+.DS_Store
+Thumbs.db

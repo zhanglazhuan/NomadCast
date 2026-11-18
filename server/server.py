@@ -25,6 +25,8 @@ from podcast_service.lookup import lookup_podcast, batch_lookup_podcasts
 from accounts import register, login
 from blacklist import (is_blacklisted, add as blacklist_add,
                        remove as blacklist_remove, all_ids as blacklist_all)
+from radio_service import catalog as radio_catalog
+from radio_service import stream as radio_stream
 
 app = Flask(__name__)
 app.json.compact = True  # Flask 3.x compact JSON
@@ -147,6 +149,26 @@ _prune_thread = threading.Thread(target=_log_pruner_loop, name="log-pruner", dae
 _prune_thread.start()
 
 
+# ─── 电台目录刷新 ─────────────────────────────────────────────
+RADIO_REFRESH_HOURS = int(os.environ.get("NOMADCAST_RADIO_REFRESH_HOURS", "24"))
+
+
+def _radio_refresh_loop():
+    time.sleep(5)  # 首次稍候，避免拖慢启动；目录约 1-3 分钟拉全
+    while True:
+        try:
+            radio_catalog.refresh()
+            app.logger.info("[radio] catalog refreshed: %s", radio_catalog.get_countries())
+        except Exception:
+            app.logger.exception("[radio] refresh failed")
+        time.sleep(RADIO_REFRESH_HOURS * 3600)
+
+
+_radio_refresh_thread = threading.Thread(
+    target=_radio_refresh_loop, name="radio-refresh", daemon=True)
+_radio_refresh_thread.start()
+
+
 @app.route("/")
 def index():
     """服务状态页"""
@@ -172,6 +194,12 @@ def index():
             "/api/episodes?feed_url=<url>": "解析 RSS 获取单集列表（可选: &offset=0&limit=50）",
             # 黑名单
             "/api/blacklist": "查看频道黑名单",
+            # 电台
+            "/api/radio/countries": "国家列表（CN/US）",
+            "/api/radio/regions?country=cn": "该国的 全国+省/州 列表",
+            "/api/radio/stations?country=cn&region=beijing&order=popular": "地区电台列表（分页）",
+            "/api/radio/resolve?uuid=...": "解析电台播放地址（统一代理）",
+            "/api/radio/stream?uuid=...": "电台流转发（MP3/AAC/HLS）",
             # 播放 & 下载
             "/api/play?url=<audio_url>": "已禁用服务端转码（请先下载）",
             "/api/download?url=<audio_url>&title=<name>": "下载单集音频",
@@ -901,6 +929,98 @@ def api_logs_upload():
         return jsonify({"error": f"日志写入失败: {e}"}), 500
 
     return jsonify({"ok": True, "session": session, "lines": len(lines)})
+
+
+# ─── 电台 ──────────────────────────────────────────────────────
+@app.route("/api/radio/countries")
+@api_key_required
+def api_radio_countries():
+    return jsonify(radio_catalog.get_countries())
+
+
+@app.route("/api/radio/regions")
+@api_key_required
+def api_radio_regions():
+    country = (request.args.get("country", "CN") or "CN").upper()
+    if country not in ("CN", "US"):
+        return jsonify({"error": "不支持的 country"}), 400
+    return jsonify(radio_catalog.get_regions(country))
+
+
+@app.route("/api/radio/stations")
+@api_key_required
+def api_radio_stations():
+    country = (request.args.get("country", "CN") or "CN").upper()
+    if country not in ("CN", "US"):
+        return jsonify({"error": "不支持的 country"}), 400
+    region = request.args.get("region") or None
+    order = request.args.get("order", "popular")
+    q = request.args.get("q") or None
+    try:
+        offset = max(0, int(request.args.get("offset", "0")))
+        limit = min(200, max(1, int(request.args.get("limit", "50"))))
+    except ValueError:
+        return jsonify({"error": "offset/limit 必须是数字"}), 400
+
+    total, page = radio_catalog.get_stations(country, region, order, q, offset, limit)
+    return jsonify({
+        "region": {"key": region or "all",
+                   "name": radio_catalog.region_display_name(country, region)},
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "stations": page,
+    })
+
+
+@app.route("/api/radio/resolve")
+@api_key_required
+def api_radio_resolve():
+    uuid = request.args.get("uuid", "").strip()
+    if not uuid:
+        return jsonify({"error": "缺少 uuid 参数"}), 400
+    st = radio_catalog.get_station(uuid)
+    if st is None:
+        return jsonify({"error": "station_not_found"}), 404
+    return jsonify({
+        "uuid": st["uuid"],
+        "name": st["name"],
+        # 与 /api/ota/check 一致的绝对地址约定（{scheme}://{host}/api/...）
+        "play_url": f"{_client_scheme()}://{request.host}/api/radio/stream?uuid={st['uuid']}",
+        "format": st["format"],
+        "codec": st["codec"],
+        "bitrate": st["bitrate"],
+        "expires_at": None,
+    })
+
+
+@app.route("/api/radio/stream")
+@api_key_required
+def api_radio_stream():
+    uuid = request.args.get("uuid", "").strip()
+    if not uuid:
+        return jsonify({"error": "缺少 uuid 参数"}), 400
+    st = radio_catalog.get_station(uuid)
+    if st is None:
+        return jsonify({"error": "station_not_found"}), 404
+
+    seg_raw = request.args.get("seg")
+    try:
+        if seg_raw is not None:
+            i = int(seg_raw)
+            data, ctype = radio_stream.segment(uuid, st["url"], i)
+            if data is None:
+                return jsonify({"error": "segment_not_found"}), 404
+            return Response(data, content_type=ctype or "video/mp2t")
+        if radio_stream.is_hls(st):
+            return Response(radio_stream.hls_playlist(uuid, st["url"]),
+                            content_type="application/vnd.apple.mpegurl",
+                            headers={"Cache-Control": "no-cache"})
+        status, ctype, gen = radio_stream.passthrough(st["url"])
+        return Response(gen, status=status, content_type=ctype,
+                        headers={"Cache-Control": "no-cache"})
+    except Exception as e:
+        return jsonify({"error": "station_unavailable", "reason": str(e)}), 502
 
 
 if __name__ == "__main__":

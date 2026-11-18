@@ -39,6 +39,7 @@
 #include "app_event.h"
 #include "flash_store.h"
 #include "nomadcast.h"
+#include "server_config.h"
 
 static const char *TAG = "audio_player";
 
@@ -186,7 +187,22 @@ static audio_element_handle_t create_decoder(void) {
  * silently pretending that resume succeeded. */
 static int http_stream_event_handler(http_stream_event_msg_t *msg)
 {
-    if (!msg || msg->event_id != HTTP_STREAM_FINISH_REQUEST || !msg->el) return 0;
+    if (!msg || !msg->el) return 0;
+
+    /* Before connecting, attach the shared API key to streams that target our
+     * own aggregation server (the /api/radio/stream proxy).  Direct CDN URLs
+     * must never leak the key to third parties, so gate strictly on the base
+     * URL prefix — same convention as the podcast HTTP client. */
+    if (msg->event_id == HTTP_STREAM_PRE_REQUEST) {
+        if (strncmp(s_player.esp_uri, NOMADCAST_SERVER_BASE,
+                    strlen(NOMADCAST_SERVER_BASE)) == 0) {
+            esp_http_client_set_header((esp_http_client_handle_t)msg->http_client,
+                                       "X-Api-Key", NOMADCAST_API_KEY);
+        }
+        return 0;
+    }
+
+    if (msg->event_id != HTTP_STREAM_FINISH_REQUEST) return 0;
     audio_element_info_t info = {0};
     audio_element_getinfo(msg->el, &info);
     int status = esp_http_client_get_status_code((esp_http_client_handle_t)msg->http_client);

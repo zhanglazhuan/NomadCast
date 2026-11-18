@@ -29,6 +29,7 @@ typedef enum {
     APP_EVENT_WEATHER_UPDATED,       /* data: NULL — weather worker finished a fetch */
     APP_EVENT_ARTWORK_READY,         /* data: NULL — podcast artwork cache finished updating */
     APP_EVENT_COUNTRY_CHANGED,       /* data: NULL — podcast region (country) changed */
+    APP_EVENT_RADIO_UPDATED,         /* data: NULL — radio worker finished a fetch */
 } app_event_t;
 
 /* ── Event data structs ─────────────────────────────────────────────────── */

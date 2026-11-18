@@ -30,8 +30,9 @@ static void radio_app_start(lv_obj_t *root, lv_group_t *group)
     g_radio_app.controller->model = g_radio_app.model;
     g_radio_app.controller->view  = g_radio_app.view;
 
-    /* Default page: station list */
-    radio_nav_replace(&g_radio_app, PAGE_STATIONS);
+    /* Default page: browse (电台 tab), then kick off the region fetch. */
+    radio_nav_replace(&g_radio_app, PAGE_BROWSE);
+    radio_controller_load_regions(&g_radio_app);
 
     ESP_LOGI(TAG, "ready");
 }

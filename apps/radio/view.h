@@ -14,17 +14,21 @@ typedef struct RadioView {
     page_navigator_t page_nav;
 } RadioView;
 
-#define RADIO_PAGE_ID_MAX 3
+#define RADIO_PAGE_ID_MAX 5
 
 enum radio_page_id_t {
     PAGE_NONE = 0,
-    PAGE_STATIONS,   /* 1 — station list (root) */
-    PAGE_PLAYING,    /* 2 — now playing */
+    PAGE_BROWSE,      /* 1 — country + region list (tab: 电台) */
+    PAGE_FAVORITES,   /* 2 — favorites list (tab: 收藏) */
+    PAGE_STATIONS,    /* 3 — station list for a region */
+    PAGE_PLAYING,     /* 4 — now playing */
 };
 
 void radio_view_init(struct RadioApp* app);
 void radio_view_deinit(struct RadioApp* app);
 
+void radio_view_browse_init_registry(struct RadioApp* app);
+void radio_view_favorites_init_registry(struct RadioApp* app);
 void radio_view_stations_init_registry(struct RadioApp* app);
 void radio_view_playing_init_registry(struct RadioApp* app);
 

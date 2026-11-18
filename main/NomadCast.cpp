@@ -87,6 +87,11 @@ extern "C" { const lv_font_t *g_cjk_font = &s_font_harmony_with_fb; }
 #define PIN_I2C_SCL     NOMADCAST_PIN_I2C_SCL
 #define PIN_TP_INT      NOMADCAST_PIN_TP_INT
 #define PIN_TP_RST      NOMADCAST_PIN_TP_RST
+#define PIN_SPI_MOSI    NOMADCAST_PIN_SPI_MOSI
+#define PIN_SPI_MISO    NOMADCAST_PIN_SPI_MISO
+#define PIN_SPI_SCK     NOMADCAST_PIN_SPI_SCK
+#define PIN_LCD_CS      NOMADCAST_PIN_LCD_CS
+#define PIN_LCD_DC      NOMADCAST_PIN_LCD_DC
 #define LCD_W           240
 #define LCD_H           320
 #define SPI_HOST_ID     SPI2_HOST

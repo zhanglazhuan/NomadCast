@@ -10,7 +10,6 @@ idf_component_register(
         "cache.c"
         "local_cache.c"
         "task_store.c"
-        "cJSON.c"
         "subpages/view_channel.c"
         "subpages/view_download_task.c"
         "subpages/view_local.c"
@@ -24,5 +23,5 @@ idf_component_register(
         "subpages/view_tab_bar.c"
         "lv_channel_card.c"
     INCLUDE_DIRS "."
-    REQUIRES lvgl app_manager launcher uilv flash_store events lang esp_http_client mbedtls audio_player fatfs sleep_monitor esp_wifi
+    REQUIRES lvgl app_manager launcher uilv flash_store events lang esp_http_client mbedtls audio_player fatfs sleep_monitor esp_wifi json
 )

@@ -81,7 +81,8 @@ static void on_app_event(app_event_t event, const void *data)
         break;
     case APP_EVENT_ARTWORK_READY:
     case APP_EVENT_COUNTRY_CHANGED:
-        /* Podcast artwork / region change — status bar has no reaction. */
+    case APP_EVENT_RADIO_UPDATED:
+        /* Podcast artwork / region change / radio refresh — no reaction. */
         break;
     }
 }
