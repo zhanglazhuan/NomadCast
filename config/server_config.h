@@ -14,7 +14,7 @@
 
 /* Backend server: scheme + host + port, no trailing slash. */
 #ifndef NOMADCAST_SERVER_BASE
-#define NOMADCAST_SERVER_BASE "http://192.168.1.88:5088"
+#define NOMADCAST_SERVER_BASE /*"http://172.20.10.3:5088"*/"http://nomadcast.omagine.net/podcast"
 #endif
 
 /* Shared API key sent as the `X-Api-Key` header on device→server requests.

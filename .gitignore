@@ -25,6 +25,9 @@ server/firmware/*.bin
 server/venv/
 server/run/
 
+# server/README.md 含本机上传/部署说明，仅本地保留，不进 git
+server/README.md
+
 # ── Python artifacts ──
 __pycache__/
 *.py[cod]
