@@ -11,6 +11,7 @@
 #include "log_system.h"
 #include "app_event.h"
 #include "server_config.h"
+#include "flash_store.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
@@ -234,6 +235,9 @@ static bool upload_chunk(const char *session_base, int start_offset, int *next_o
     esp_http_client_set_header(client, "X-Log-Session", session_base);
     esp_http_client_set_header(client, "X-Log-Offset", offset_header);
     esp_http_client_set_header(client, "X-Api-Key", NOMADCAST_API_KEY);
+    char devid[24] = {0};
+    if (flash_get_device_id(devid, sizeof(devid)) > 0)
+        esp_http_client_set_header(client, "X-Device-Id", devid);
 
     /* The explicit content length is required here. Passing 0 causes
      * esp_http_client to send an empty request body even when a post field

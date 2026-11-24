@@ -196,8 +196,11 @@ static int http_stream_event_handler(http_stream_event_msg_t *msg)
     if (msg->event_id == HTTP_STREAM_PRE_REQUEST) {
         if (strncmp(s_player.esp_uri, NOMADCAST_SERVER_BASE,
                     strlen(NOMADCAST_SERVER_BASE)) == 0) {
-            esp_http_client_set_header((esp_http_client_handle_t)msg->http_client,
-                                       "X-Api-Key", NOMADCAST_API_KEY);
+            esp_http_client_handle_t hc = (esp_http_client_handle_t)msg->http_client;
+            esp_http_client_set_header(hc, "X-Api-Key", NOMADCAST_API_KEY);
+            char devid[24] = {0};
+            if (flash_get_device_id(devid, sizeof(devid)) > 0)
+                esp_http_client_set_header(hc, "X-Device-Id", devid);
         }
         return 0;
     }

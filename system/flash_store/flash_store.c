@@ -6,7 +6,9 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "flash";
 static const char *USER_PARTITION = "nvs_user";
@@ -129,6 +131,25 @@ void flash_set_str(const char *ns, const char *key, const char *val)
     ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_set_str(h, key, val));
     ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_commit(h));
     nvs_close(h);
+}
+
+/* ── Device ID ────────────────────────────────────────────────────────────── */
+
+int flash_get_device_id(char *out, size_t max)
+{
+    if (!out || max == 0) return 0;
+
+    int len = flash_get_str("podcast", "devid", out, max, "");
+    if (len > 0 && out[0]) return len;
+
+    /* No persisted ID yet — derive it from the WiFi STA MAC and store it. */
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(out, max, "%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    flash_set_str("podcast", "devid", out);
+    ESP_LOGI(TAG, "Generated device ID: %s", out);
+    return (int)strlen(out);
 }
 
 /* ── Erase ────────────────────────────────────────────────────────────────── */

@@ -53,6 +53,19 @@ void    flash_set_bool(const char *ns, const char *key, bool val);
 int     flash_get_str(const char *ns, const char *key, char *out, size_t max, const char *def);
 void    flash_set_str(const char *ns, const char *key, const char *val);
 
+/**
+ * @brief Get the persistent device ID (12 uppercase hex chars, WiFi STA MAC).
+ *
+ * Generated once on first call and stored in NVS namespace "podcast", key
+ * "devid" (shared with the Podcast app's model and Settings/About). Callable
+ * at any time — lazily generates the ID if NVS has no value yet.
+ *
+ * @param out  Output buffer (needs >= 13 bytes for the ID + NUL).
+ * @param max  Buffer size.
+ * @return Length of the ID (0 on error).
+ */
+int     flash_get_device_id(char *out, size_t max);
+
 /* ── Erase ──────────────────────────────────────────────────────────────── */
 
 /** Erase all keys in one namespace. */

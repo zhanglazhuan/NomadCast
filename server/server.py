@@ -26,6 +26,10 @@ from podcast_service.lookup import lookup_podcast, batch_lookup_podcasts
 from accounts import register, login
 from blacklist import (is_blacklisted, add as blacklist_add,
                        remove as blacklist_remove, all_ids as blacklist_all)
+from device_blacklist import (is_device_blacklisted,
+                              add as device_blacklist_add,
+                              remove as device_blacklist_remove,
+                              all_ids as device_blacklist_all)
 from radio_service import catalog as radio_catalog
 from radio_service import stream as radio_stream
 
@@ -73,6 +77,23 @@ def api_key_required(fn):
             return jsonify({"error": "unauthorized"}), 401
         return fn(*args, **kwargs)
     return wrapper
+
+
+@app.before_request
+def _block_blacklisted_devices():
+    """Reject requests from blacklisted device IDs before any route runs.
+
+    The device identifies itself via the X-Device-Id header (WiFi STA MAC,
+    12 uppercase hex chars). This runs ahead of both api_key_required and the
+    blacklist management endpoint, so a blacklisted device cannot unblock
+    itself. Requests without the header (e.g. older firmware) are unaffected.
+    """
+    if not request.path.startswith("/api/"):
+        return None
+    device_id = request.headers.get("X-Device-Id", "").strip()
+    if device_id and is_device_blacklisted(device_id):
+        return jsonify({"error": "device blocked", "code": 403}), 403
+    return None
 
 
 # ─── Log retention ─────────────────────────────────────────────
@@ -195,6 +216,7 @@ def index():
             "/api/episodes?feed_url=<url>": "解析 RSS 获取单集列表（可选: &offset=0&limit=50）",
             # 黑名单
             "/api/blacklist": "查看频道黑名单",
+            "GET/POST/DELETE /api/device-blacklist": "查看/添加/移除设备黑名单 (X-Device-Id)",
             # 电台
             "/api/radio/countries": "国家列表（CN/US）",
             "/api/radio/regions?country=cn": "该国的 全国+省/州 列表",
@@ -760,6 +782,36 @@ def api_blacklist():
                 pass
         return jsonify({"blacklist": blacklist_all()})
     return jsonify({"blacklist": blacklist_all()})
+
+
+@app.route("/api/device-blacklist", methods=["GET", "POST", "DELETE"])
+def api_device_blacklist():
+    """查看 / 管理设备黑名单。
+
+    POST   body: {"device_id": "AABBCCDDEEFF"}  添加
+    DELETE ?id=AABBCCDDEEFF                    移除
+    GET                                        列出全部
+
+    管理操作需要共享 X-Api-Key（运维脚本/curl 使用）。黑名单设备本身的请求
+    会被 before_request 钩子拦截，无法调用本接口自我解封。
+    """
+    if request.method == "POST":
+        if not _api_key_ok():
+            return jsonify({"error": "unauthorized"}), 401
+        data = request.get_json(silent=True) or {}
+        did = (data.get("device_id") or "").strip()
+        if not did:
+            return jsonify({"error": "device_id 为必填"}), 400
+        device_blacklist_add(did)
+        return jsonify({"device_blacklist": device_blacklist_all()})
+    if request.method == "DELETE":
+        if not _api_key_ok():
+            return jsonify({"error": "unauthorized"}), 401
+        did = request.args.get("id", "").strip()
+        if did:
+            device_blacklist_remove(did)
+        return jsonify({"device_blacklist": device_blacklist_all()})
+    return jsonify({"device_blacklist": device_blacklist_all()})
 
 
 # ─── OTA 固件更新 ──────────────────────────────────────────

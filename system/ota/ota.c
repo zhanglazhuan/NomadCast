@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
+#include "flash_store.h"
 
 static const char *TAG = "ota";
 
@@ -106,6 +107,15 @@ void ota_init(void)
 
     const esp_app_desc_t *desc = esp_app_get_description();
     ESP_LOGI(TAG, "Running: %s v%s", desc->project_name, desc->version);
+}
+
+/* Attach the device ID so the server can identify/blacklist this device.
+ * OTA endpoints are not X-Api-Key protected, but they still carry the ID. */
+static void ota_set_device_id(esp_http_client_handle_t client)
+{
+    char devid[24] = {0};
+    if (flash_get_device_id(devid, sizeof(devid)) > 0)
+        esp_http_client_set_header(client, "X-Device-Id", devid);
 }
 
 /* ── Manifest download helper ─────────────────────────────────────────────── */
@@ -211,6 +221,8 @@ void ota_check(const char *manifest_url, ota_check_cb_t cb, void *user_data)
         return;
     }
 
+    ota_set_device_id(client);
+
     esp_err_t err = esp_http_client_perform(client);
 
     if (err != ESP_OK) {
@@ -248,6 +260,7 @@ bool ota_perform(const char *firmware_url, ota_progress_cb_t progress_cb, void *
         return false;
     }
     esp_http_client_set_method(head, HTTP_METHOD_HEAD);
+    ota_set_device_id(head);
     esp_err_t err = esp_http_client_perform(head);
     if (err == ESP_OK) {
         s_ota.content_length = esp_http_client_get_content_length(head);

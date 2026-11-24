@@ -11,6 +11,7 @@
 
 #include "radio_api.h"
 #include "server_config.h"
+#include "flash_store.h"
 
 static const char *TAG = "radio_api";
 
@@ -56,6 +57,9 @@ static char *radio_http_get(const char *url, int *out_status, radio_api_err_t *o
 
     /* The radio endpoints all live on our aggregation server. */
     esp_http_client_set_header(client, "X-Api-Key", NOMADCAST_API_KEY);
+    char devid[24] = {0};
+    if (flash_get_device_id(devid, sizeof(devid)) > 0)
+        esp_http_client_set_header(client, "X-Device-Id", devid);
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
