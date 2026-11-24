@@ -202,6 +202,7 @@ typedef struct {
     int             next;
     LocalPageCtx   *owner;    /* page ctx that spawned this build */
     uint32_t        gen;      /* generation at spawn; compared to owner->build_gen */
+    int             restore_y; /* scroll_y to restore once the last chunk is built */
 } card_build_ctx_t;
 
 static void build_card_chunk_cb(lv_timer_t *timer) {
@@ -223,12 +224,18 @@ static void build_card_chunk_cb(lv_timer_t *timer) {
     }
     bc->next = end;
     if (bc->next >= bc->count) {
+        if (bc->restore_y > 0) {
+            lv_obj_update_layout(bc->row);
+            lv_obj_scroll_to_y(bc->row, bc->restore_y, LV_ANIM_OFF);
+            /* 滚到位后恢复可见(构建分片期间用 opa 隐藏,见 refresh_list) */
+            lv_obj_set_style_opa(bc->row, LV_OPA_COVER, 0);
+        }
         free((void *)bc->albums); free(bc); lv_timer_del(timer);
     }
 }
 
 /* ---- Dropdown + card list ---- */
-static void refresh_list(LocalPageCtx* ctx, int cat) {
+static void refresh_list(LocalPageCtx* ctx, int cat, int restore_y) {
     lv_obj_t* page = ctx->content;
     if (!page) return;
     lv_obj_clean(page);
@@ -264,10 +271,16 @@ static void refresh_list(LocalPageCtx* ctx, int cat) {
 
     if (total == 0) { free(albums); return; }
 
+    /* 恢复滚动时,构建分片期间用 opa 隐藏列表,避免"从头闪一下再跳"的过渡。
+     * 不能用 LV_OBJ_FLAG_HIDDEN:带该 flag 的对象会被跳过布局(lv_obj_pos.c),
+     * 使 lv_obj_scroll_to_y 的可滚范围被算成 0。opa 不影响布局。 */
+    lv_obj_set_style_opa(page, restore_y > 0 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+
     ctx->build_gen++;
     card_build_ctx_t *bc = (card_build_ctx_t *)calloc(1, sizeof(card_build_ctx_t));
     bc->row = page; bc->albums = albums; bc->count = total;
     bc->owner = ctx; bc->gen = ctx->build_gen;
+    bc->restore_y = restore_y;
     lv_timer_create(build_card_chunk_cb, 1, bc);
 }
 
@@ -275,7 +288,7 @@ static void on_dropdown_changed(lv_event_t* e) {
     LocalPageCtx* ctx = lv_event_get_user_data(e);
     uint32_t sel = lv_dropdown_get_selected(lv_event_get_current_target_obj(e));
     ctx->active_cat = (sel == 0) ? CAT_ALL : (int)(sel - 1);
-    refresh_list(ctx, ctx->active_cat);
+    refresh_list(ctx, ctx->active_cat, 0);
 }
 
 /* ---- Download-complete → live refresh (only when viewing Local) ---- */
@@ -286,7 +299,7 @@ static void on_download_complete_event(app_event_t event, const void *data) {
     if (s_local_screen != lv_screen_active()) return;                 /* not viewing Local now */
 
     if (s_local_ctx) {
-        refresh_list(s_local_ctx, s_local_ctx->active_cat);
+        refresh_list(s_local_ctx, s_local_ctx->active_cat, 0);
     } else {
         /* Hint mode → content just became available; rebuild the page. */
         page_navigator_navigate_to(&g_podcast_app.view->page_nav,
@@ -299,7 +312,16 @@ static void on_local_page_delete(lv_event_t *e) {
     lv_obj_t *screen = lv_event_get_target(e);
     if (s_local_screen == screen) {
         s_local_screen = NULL;
-        if (s_local_ctx) { free(s_local_ctx); s_local_ctx = NULL; }
+        if (s_local_ctx) {
+            /* 页面销毁前把列表滚动位置 + 选中分类写回 model,返回时据此恢复。 */
+            PodcastModel *m = g_podcast_app.model;
+            if (m && s_local_ctx->content && lv_obj_is_valid(s_local_ctx->content)) {
+                m->local_scroll_y  = lv_obj_get_scroll_y(s_local_ctx->content);
+                m->local_tab_index = (s_local_ctx->active_cat == CAT_ALL)
+                                     ? 0 : (s_local_ctx->active_cat + 1);
+            }
+            free(s_local_ctx); s_local_ctx = NULL;
+        }
     }
 }
 
@@ -385,9 +407,12 @@ static lv_obj_t* build_local_page(struct PodcastApp* app, void* user_data) {
         lv_obj_set_size(ctx->content, LV_PCT(100), LV_PCT(100));
         lv_obj_set_flex_grow(ctx->content, 1);
 
-        ctx->active_cat = CAT_ALL;
-        lv_dropdown_set_selected(ctx->dropdown, 0);
-        refresh_list(ctx, CAT_ALL);
+        PodcastModel *m = g_podcast_app.model;
+        int tab_index = m ? m->local_tab_index : 0;
+        if (tab_index < 0 || tab_index > CHANNEL_CATEGORY_COUNT) tab_index = 0;
+        ctx->active_cat = (tab_index == 0) ? CAT_ALL : (tab_index - 1);
+        lv_dropdown_set_selected(ctx->dropdown, tab_index);
+        refresh_list(ctx, ctx->active_cat, m ? m->local_scroll_y : 0);
         printf("[INF] Local page built (content)\n"); fflush(stdout);
     }
 

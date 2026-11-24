@@ -13,6 +13,9 @@
 extern RadioApp g_radio_app;
 extern const lv_font_t *g_cjk_font;
 
+/* Defined in apps/settings/hal_esp.c — shared across apps. */
+bool hal_wifi_is_connected(void);
+
 static void on_station_click(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     radio_controller_play(&g_radio_app, RADIO_SRC_STATIONS, idx);
@@ -37,17 +40,21 @@ static lv_obj_t *build_stations_page(struct RadioApp *app, void *user_data) {
     int count = m ? m->station_count : 0;
 
     if (count == 0) {
-        const char *msg;
-        if (m && m->busy)      msg = tr(STR_RADIO_LOADING);
-        else if (m && m->error[0]) msg = m->error;
-        else                   msg = tr(STR_RADIO_NO_STATIONS);
-        lv_obj_t *lbl = lv_label_create(cont);
-        lv_label_set_text(lbl, msg);
-        lv_obj_set_style_text_color(lbl, lv_color_hex(0x666666), 0);
-        lv_obj_set_style_text_font(lbl, g_cjk_font, 0);
-        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_add_flag(lbl, LV_OBJ_FLAG_FLOATING);
-        lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+        if (m && !m->busy && !hal_wifi_is_connected()) {
+            radio_view_wifi_offline(cont);
+        } else {
+            const char *msg;
+            if (m && m->busy)      msg = tr(STR_RADIO_LOADING);
+            else if (m && m->error[0]) msg = m->error;
+            else                   msg = tr(STR_RADIO_NO_STATIONS);
+            lv_obj_t *lbl = lv_label_create(cont);
+            lv_label_set_text(lbl, msg);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(0x666666), 0);
+            lv_obj_set_style_text_font(lbl, g_cjk_font, 0);
+            lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_add_flag(lbl, LV_OBJ_FLAG_FLOATING);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+        }
         return page.screen;
     }
 

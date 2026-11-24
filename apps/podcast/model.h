@@ -120,6 +120,13 @@ typedef struct PodcastModel {
     int       network_channels_shown[CHANNEL_CATEGORY_COUNT];
     int       network_active_category;  /* last selected category tab */
 
+    /* 会话内列表状态:滚动位置 + 上次下拉选中项(0=全部,1..N=分类+1)。
+     * 退出播客 app 后随 model 一并释放,不做持久化。 */
+    int       network_scroll_y;
+    int       network_tab_index;
+    int       local_scroll_y;
+    int       local_tab_index;
+
     Episode  *network_episodes;
     int       network_episode_count;
 

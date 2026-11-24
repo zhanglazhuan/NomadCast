@@ -78,6 +78,10 @@ Page lv_page_create(const char *title, bool allow_back, lv_event_cb_t back_cb, v
             if (back_cb) {
                 lv_obj_add_event_cb(btn_back, back_cb, LV_EVENT_CLICKED, user_data);
             }
+
+            /* 扩大返回按钮的点击热区（视觉不变）——箭头本体只有 24×24，太小不好点。
+             * ext_click_area 只扩大命中范围，不改尺寸/布局/外观。 */
+            lv_obj_set_ext_click_area(btn_back, 12);
         } else {
             btn_back = lv_obj_create(page.header);
             lv_obj_remove_style_all(btn_back);

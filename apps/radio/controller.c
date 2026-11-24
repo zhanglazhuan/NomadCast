@@ -189,8 +189,8 @@ static radio_station_t *list_at(RadioModel *m, int i) {
 }
 
 static radio_station_t *current_station(RadioModel *m) {
-    if (!m || m->current < 0 || m->current >= list_count(m)) return NULL;
-    return list_at(m, m->current);
+    if (!m || !m->playing_valid) return NULL;
+    return &m->playing;
 }
 
 /* ── UI-thread entry points ────────────────────────────────────────────────── */
@@ -237,14 +237,14 @@ void radio_controller_play(RadioApp *app, int src, int idx) {
     radio_station_t *s = list_at(m, idx);
     if (!s) return;
 
-    if (s->hls) {
-        /* No HLS decoder element on-device — surface it instead of failing open. */
-        lv_toast_show(tr(STR_RADIO_FAILED_TO_PLAY), 2000);
-        return;
-    }
+    /* Snapshot the station so the player screen and favorite toggle keep a
+     * stable reference even after the source list (favorites) mutates. */
+    m->playing = *s;
+    m->playing_valid = true;
 
-    /* Stream always goes through our proxy; the audio player attaches the shared
-     * API key on HTTP_STREAM_PRE_REQUEST for our base URL. */
+    /* HLS (m3u8) and MP3/AAC alike go through the proxy; the audio player's
+     * http_stream element parses playlists (enable_playlist_parser) and chains
+     * live segments, so no special-casing is needed here. */
     char url[512];
     snprintf(url, sizeof(url), "%s/api/radio/stream?uuid=%s",
              NOMADCAST_SERVER_BASE, s->uuid);

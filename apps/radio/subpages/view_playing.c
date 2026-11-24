@@ -25,15 +25,11 @@ typedef struct {
     lv_timer_t *timer;
 } RadioPlayingCtx;
 
-/* The playing station may come from either the browse list or favorites. */
+/* The playing station is a stable snapshot set by radio_controller_play(), so
+ * it survives list mutations (e.g. unfavoriting memmoves favorites[]). */
 static radio_station_t *cur_station(RadioModel *m) {
-    if (!m || m->current < 0) return NULL;
-    if (m->play_source == RADIO_SRC_FAVORITES) {
-        if (m->current >= m->favorite_count) return NULL;
-        return &m->favorites[m->current];
-    }
-    if (m->current >= m->station_count) return NULL;
-    return &m->stations[m->current];
+    if (!m || !m->playing_valid) return NULL;
+    return &m->playing;
 }
 
 static void refresh_playing(RadioPlayingCtx *ctx) {

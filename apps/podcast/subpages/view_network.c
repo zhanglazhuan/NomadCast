@@ -131,7 +131,17 @@ static void on_page_delete(lv_event_t* e) {
     NetworkPage* np = lv_event_get_user_data(e);
     if (!np) return;
     stop_all_timers(np);
-    if (np->ctx) { cancel_build_timer(np->ctx); free(np->ctx); np->ctx = NULL; }
+    if (np->ctx) {
+        /* 页面销毁前把列表滚动位置 + 选中分类写回 model,返回时据此恢复。 */
+        PodcastModel *m = g_podcast_app.model;
+        if (m && np->ctx->content && lv_obj_is_valid(np->ctx->content)) {
+            m->network_scroll_y  = lv_obj_get_scroll_y(np->ctx->content);
+            m->network_tab_index = (np->ctx->active_cat == CAT_ALL)
+                                   ? 0 : (np->ctx->active_cat + 1);
+        }
+        cancel_build_timer(np->ctx);
+        free(np->ctx); np->ctx = NULL;
+    }
     if (s_active_net_page == np) s_active_net_page = NULL;
     free(np);
     printf("[INF] Network page timers stopped\n"); fflush(stdout);
@@ -257,6 +267,7 @@ typedef struct {
     int             count;
     int             card_h;
     int             next;     /* next index to create */
+    int             restore_y; /* scroll_y to restore once the last chunk is built */
 } card_build_ctx_t;
 
 static void build_card_chunk_cb(lv_timer_t *timer) {
@@ -281,6 +292,12 @@ static void build_card_chunk_cb(lv_timer_t *timer) {
     bc->next = end;
 
     if (bc->next >= bc->count) {
+        if (bc->restore_y > 0) {
+            lv_obj_update_layout(bc->row);
+            lv_obj_scroll_to_y(bc->row, bc->restore_y, LV_ANIM_OFF);
+            /* 滚到位后恢复可见(构建分片期间用 opa 隐藏,见 refresh_list) */
+            lv_obj_set_style_opa(bc->row, LV_OPA_COVER, 0);
+        }
         if (bc->ctx) bc->ctx->build_timer = NULL;
         free((void *)bc->albums);
         free(bc);
@@ -303,7 +320,7 @@ static void cancel_build_timer(NetworkPageCtx *ctx) {
     }
 }
 
-static void refresh_list(NetworkPageCtx* ctx, int cat) {
+static void refresh_list(NetworkPageCtx* ctx, int cat, int restore_y) {
     lv_obj_t* page = ctx->content;
     if (!page) return;
 
@@ -347,11 +364,17 @@ static void refresh_list(NetworkPageCtx* ctx, int cat) {
 
     if (total == 0) { free(albums); return; }
 
+    /* 恢复滚动时,构建分片期间用 opa 隐藏列表,避免"从头闪一下再跳"的过渡。
+     * 不能用 LV_OBJ_FLAG_HIDDEN:带该 flag 的对象会被跳过布局(lv_obj_pos.c),
+     * 使 lv_obj_scroll_to_y 的可滚范围被算成 0。opa 不影响布局。 */
+    lv_obj_set_style_opa(page, restore_y > 0 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+
     card_build_ctx_t *bc = (card_build_ctx_t *)calloc(1, sizeof(card_build_ctx_t));
     bc->ctx    = ctx;
     bc->row    = page;
     bc->albums = albums;
     bc->count  = total;
+    bc->restore_y = restore_y;
     ctx->build_timer = lv_timer_create(build_card_chunk_cb, 1, bc);
 }
 
@@ -369,7 +392,7 @@ static void on_artwork_ready(app_event_t event, const void *data) {
     if (!lv_obj_is_valid(np->container)) return;
     NetworkPageCtx *ctx = np->ctx;
     if (!ctx || !ctx->content) return;
-    refresh_list(ctx, ctx->active_cat);
+    refresh_list(ctx, ctx->active_cat, 0);
 }
 
 static void on_dropdown_changed(lv_event_t* e) {
@@ -378,7 +401,7 @@ static void on_dropdown_changed(lv_event_t* e) {
     ctx->active_cat = (sel == 0) ? CAT_ALL : (int)(sel - 1);
 
     /* Filter the already-loaded channel list by the selected category. */
-    refresh_list(ctx, ctx->active_cat);
+    refresh_list(ctx, ctx->active_cat, 0);
 }
 
 static void on_search_bar_clicked(lv_event_t* e) {
@@ -439,10 +462,13 @@ static void build_online_content(NetworkPageCtx* ctx, lv_obj_t* parent) {
     lv_obj_set_size(ctx->content, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_grow(ctx->content, 1);
 
-    /* Default: "全部" */
-    ctx->active_cat = CAT_ALL;
-    lv_dropdown_set_selected(ctx->dropdown, 0);
-    refresh_list(ctx, CAT_ALL);
+    /* 恢复上次的分类与滚动位置(会话内保留) */
+    PodcastModel *m = g_podcast_app.model;
+    int tab_index = m ? m->network_tab_index : 0;
+    if (tab_index < 0 || tab_index > CHANNEL_CATEGORY_COUNT) tab_index = 0;
+    ctx->active_cat = (tab_index == 0) ? CAT_ALL : (tab_index - 1);
+    lv_dropdown_set_selected(ctx->dropdown, tab_index);
+    refresh_list(ctx, ctx->active_cat, m ? m->network_scroll_y : 0);
 }
 
 /* ── 搜索 / 本地链接 ───────────────────────────────────────────────────── */
@@ -461,7 +487,7 @@ static void on_forward_clicked(lv_event_t* e) {
     g_podcast_app.model->network_channels_shown[cat] = offset;
 
     fprintf(stderr, "[FWD] cat=%d total=%d offset=%d\n", cat, total, offset);
-    refresh_list(ctx, cat);
+    refresh_list(ctx, cat, 0);
 }
 
 /* ── 点击处理 ────────────────────────────────────────────────────────── */

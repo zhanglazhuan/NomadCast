@@ -27,6 +27,11 @@ enum radio_page_id_t {
 void radio_view_init(struct RadioApp* app);
 void radio_view_deinit(struct RadioApp* app);
 
+/* Offline hint: "无网络" + "打开设置" button (same as Podcast). Builds into
+ * `parent` as floating widgets; tapping the button closes the app and opens
+ * Settings. */
+void radio_view_wifi_offline(lv_obj_t *parent);
+
 void radio_view_browse_init_registry(struct RadioApp* app);
 void radio_view_favorites_init_registry(struct RadioApp* app);
 void radio_view_stations_init_registry(struct RadioApp* app);

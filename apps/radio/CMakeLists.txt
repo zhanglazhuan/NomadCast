@@ -5,5 +5,5 @@ idf_component_register(
         "subpages/view_stations.c" "subpages/view_playing.c"
         "subpages/view_tab_bar.c"
     INCLUDE_DIRS "." "subpages"
-    REQUIRES lvgl app_manager uilv lang audio_player input flash_store events esp_http_client mbedtls json
+    REQUIRES lvgl app_manager launcher uilv lang audio_player input flash_store events esp_http_client mbedtls json
 )

@@ -202,6 +202,17 @@ static int http_stream_event_handler(http_stream_event_msg_t *msg)
         return 0;
     }
 
+    /* Live HLS: the http_stream playlist parser drives these two events when
+     * enable_playlist_parser is set.  Advance to the next segment on track end,
+     * and re-fetch the (live) playlist when the current snapshot is exhausted —
+     * exactly the ADF pipeline_living_stream pattern. */
+    if (msg->event_id == HTTP_STREAM_FINISH_TRACK) {
+        return http_stream_next_track(msg->el);
+    }
+    if (msg->event_id == HTTP_STREAM_FINISH_PLAYLIST) {
+        return http_stream_fetch_again(msg->el);
+    }
+
     if (msg->event_id != HTTP_STREAM_FINISH_REQUEST) return 0;
     audio_element_info_t info = {0};
     audio_element_getinfo(msg->el, &info);
@@ -239,6 +250,11 @@ static bool pipeline_build(void)
         http.type = AUDIO_STREAM_READER;
         http.crt_bundle_attach = esp_crt_bundle_attach;
         http.event_handle = http_stream_event_handler;
+        /* Parse m3u8/HLS playlists.  The parser only engages when the upstream
+         * answers with a playlist content-type (or a .m3u8 URL), so plain MP3/
+         * AAC/M4A streams are unaffected.  Live HLS keeps playing across
+         * segments via the FINISH_TRACK/FINISH_PLAYLIST event handler above. */
+        http.enable_playlist_parser = true;
         /* A zero range size means "from offset to EOF".  This is required for
          * pause/resume: http_stream will emit Range: bytes=<byte_pos>-. */
         http.request_range_size = 0;

@@ -72,6 +72,13 @@ typedef struct RadioModel {
     int  current;         /* index into stations[] or favorites[] */
     int  play_source;     /* radio_src_t */
 
+    /* Stable snapshot of the station shown on the player screen. Decoupled from
+     * stations[]/favorites[] so unfavoriting (which memmoves favorites[] and
+     * shrinks favorite_count) can't invalidate index/pointer resolution: the
+     * title, subtitle and favorite toggle all read from this copy. */
+    radio_station_t playing;
+    bool playing_valid;
+
     /* status */
     bool busy;
     char error[128];

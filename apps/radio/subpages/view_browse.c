@@ -14,6 +14,9 @@
 extern RadioApp g_radio_app;
 extern const lv_font_t *g_cjk_font;
 
+/* Defined in apps/settings/hal_esp.c — shared across apps. */
+bool hal_wifi_is_connected(void);
+
 typedef struct {
     lv_obj_t *textarea;
     lv_obj_t *kb;
@@ -197,6 +200,8 @@ void browse_render_body(BrowseCtx *ctx) {
     if (m->region_count == 0) {
         if (m->busy) {
             add_status_label(ctx, tr(STR_RADIO_LOADING));
+        } else if (!hal_wifi_is_connected()) {
+            radio_view_wifi_offline(ctx->body);
         } else if (m->error[0]) {
             add_status_label(ctx, m->error);
             lv_obj_t *btn = lv_button_create(ctx->body);

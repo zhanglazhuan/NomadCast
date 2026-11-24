@@ -9,10 +9,54 @@
 #include "../controller.h"
 #include "lv_page.h"
 #include "lv_home_indicator.h"
+#include "launcher.h"
+#include "app_manager.h"
 #include "lang.h"
 
 extern WeatherApp g_weather_app;
 extern const lv_font_t *g_cjk_font;
+
+/* Defined in apps/settings/hal_esp.c — shared across apps. */
+bool hal_wifi_is_connected(void);
+
+/* Offline hint: "无网络" + "打开设置" (mirrors Podcast view_network). */
+static void deferred_open_settings(lv_timer_t *timer) {
+    launcher_open_app("Settings");
+    lv_timer_del(timer);
+}
+
+static void on_open_settings(lv_event_t *e) {
+    (void)e;
+    app_manager_delete();
+    lv_timer_create(deferred_open_settings, 300, NULL);
+}
+
+static void build_wifi_offline(lv_obj_t *parent) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, tr(STR_NO_NETWORK));
+    lv_obj_set_style_text_color(label, lv_color_hex(0x666666), 0);
+    lv_obj_set_style_text_font(label, g_cjk_font, 0);
+    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(label, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, -30);
+
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(btn, 160, 40);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1976D2), 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_set_style_radius(btn, 8, 0);
+    lv_obj_add_event_cb(btn, on_open_settings, LV_EVENT_CLICKED, NULL);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, 24);
+
+    lv_obj_t *btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, tr(STR_OPEN_SETTINGS));
+    lv_obj_set_style_text_color(btn_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(btn_label, g_cjk_font, 0);
+    lv_obj_center(btn_label);
+}
 
 /* "YYYY-MM-DD" → localized weekday + "MM-DD". */
 static void format_day(char *out, size_t n, const char *ymd) {
@@ -103,6 +147,11 @@ static lv_obj_t *build_current_page(struct WeatherApp *app, void *user_data) {
     lv_obj_set_scrollbar_mode(cont, LV_SCROLLBAR_MODE_AUTO);
 
     if (!m || !m->has_data) {
+        if (m && !m->busy && !hal_wifi_is_connected()) {
+            /* No WiFi → offline hint + Open Settings button (same as Podcast). */
+            build_wifi_offline(cont);
+            return page.screen;
+        }
         /* loading / error / idle → centered message + a City button. */
         const char *msg = (m && m->error[0]) ? m->error : tr(STR_WEATHER_LOADING);
         lv_obj_t *lbl = make_label(cont, msg, g_cjk_font, 0x666666);
