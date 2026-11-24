@@ -18,6 +18,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_file, Response
 from podcast_service.search import search_podcasts, search_episodes
 from podcast_service.rss_parser import parse_feed
+from podcast_service.itunes_feed import fetch_episodes as itunes_fetch_episodes, is_xyzfm_feed
 from podcast_service.downloader import download_episode, download_episodes_batch
 from podcast_service.genres import get_genres, get_genre_tree
 from podcast_service.charts import get_top_podcasts, get_top_episodes
@@ -269,6 +270,15 @@ def api_episodes():
         limit = 50
 
     try:
+        # 小宇宙的 feed.xyzfm.space 现在对非白名单 IP 直接 403（IP ACL，改 UA 无效），
+        # 与其等 parse_feed 拿到拦截页报错，不如直接走 iTunes Lookup 兜底（需要 collection_id）。
+        if cid_str and is_xyzfm_feed(feed_url):
+            try:
+                return jsonify(itunes_fetch_episodes(cid_str, offset=offset, limit=limit))
+            except Exception as itunes_err:
+                # iTunes 也没戏（播客未被收录等）→ 回退到 RSS，让下面的逻辑给出原始错误。
+                app.logger.warning("[episodes] itunes fallback failed for %s: %s", feed_url, itunes_err)
+
         data = parse_feed(feed_url, offset=offset, limit=limit)
         return jsonify(data)
     except ValueError as e:

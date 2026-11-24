@@ -90,8 +90,10 @@ Page lv_page_create(const char *title, bool allow_back, lv_event_cb_t back_cb, v
         if (title) {
             mid = lv_label_create(page.header);
             lv_label_set_text(mid, title);
+            lv_label_set_long_mode(mid, LV_LABEL_LONG_SCROLL_CIRCULAR);
             lv_obj_set_style_text_align(mid, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_set_style_text_font(mid, g_cjk_font ? g_cjk_font : &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(mid, lv_color_hex(0x333333), 0);
         } else {
             mid = lv_obj_create(page.header);
             lv_obj_remove_style_all(mid);

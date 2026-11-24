@@ -187,8 +187,9 @@ static lv_obj_t *build_files_page(struct PlayerApp *app, void *user_data) {
 
         lv_obj_t *name = lv_label_create(row);
         lv_label_set_text(name, entries[i].name);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_obj_set_style_text_font(name, g_cjk_font, 0);
+        lv_obj_set_style_text_color(name, lv_color_hex(0x333333), 0);
         lv_obj_set_width(name, 185);
         lv_obj_align(name, LV_ALIGN_LEFT_MID, 44, 0);
 
