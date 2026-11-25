@@ -43,6 +43,15 @@
 
 static const char *TAG = "audio_player";
 
+/* The device ID is read from NVS once, on the UI thread (internal-DRAM stack),
+ * and reused here for HTTP headers.  It must NOT be re-read from an ADF
+ * element task: those run with PSRAM stacks (see the audio_thread.c vendored
+ * patch → MALLOC_CAP_SPIRAM), and an NVS/flash read on such a task trips
+ * esp_task_stack_is_sane_cache_disabled() in spi_flash/cache_utils.c
+ * (assert → reboot).  audio_player_init() fills this before any pipeline task
+ * is spawned. */
+static char s_device_id[24] = {0};
+
 void audio_player_log_memory(const char *where)
 {
     size_t free_bytes = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -198,9 +207,8 @@ static int http_stream_event_handler(http_stream_event_msg_t *msg)
                     strlen(NOMADCAST_SERVER_BASE)) == 0) {
             esp_http_client_handle_t hc = (esp_http_client_handle_t)msg->http_client;
             esp_http_client_set_header(hc, "X-Api-Key", NOMADCAST_API_KEY);
-            char devid[24] = {0};
-            if (flash_get_device_id(devid, sizeof(devid)) > 0)
-                esp_http_client_set_header(hc, "X-Device-Id", devid);
+            if (s_device_id[0] != '\0')
+                esp_http_client_set_header(hc, "X-Device-Id", s_device_id);
         }
         return 0;
     }
@@ -366,6 +374,11 @@ static void build_resume_uri(char *out, size_t out_sz)
  * ══════════════════════════════════════════════════════════════════════════ */
 
 bool audio_player_init(void) {
+    /* Cache the device ID here, on the caller's internal-DRAM stack, so the
+     * http_stream element task never has to touch NVS/flash itself. */
+    if (s_device_id[0] == '\0')
+        flash_get_device_id(s_device_id, sizeof(s_device_id));
+
     if (s_player.initialized) return true;
     gpio_config_t out = { .pin_bit_mask = BIT64(PIN_AP_EN), .mode = GPIO_MODE_OUTPUT };
     gpio_config(&out);

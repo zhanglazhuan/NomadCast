@@ -111,6 +111,12 @@ static void podcast_app_stop(void)
     printf("[INF] podcast_app_stop\n");
 
     cache_playback_save();
+
+    /* Stop any audio BEFORE tearing the app down.  Exiting the podcast app
+     * must halt playback — otherwise the pipeline keeps running after the UI
+     * is gone (and a later app's play() would race it for the I2S/decoder). */
+    hal_audio_stop();
+
     podcast_controller_deinit(&g_podcast_app);
     podcast_view_deinit(&g_podcast_app);
     podcast_model_deinit(&g_podcast_app);

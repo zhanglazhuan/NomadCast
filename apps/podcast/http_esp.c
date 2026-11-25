@@ -246,7 +246,12 @@ bool http_download_to_file(const char *url, const char *file_path,
     for (int redirect = 0; redirect < 10; redirect++) {
         esp_http_client_config_t cfg = {
             .url = current_url,
-            .timeout_ms = 120000,
+            /* 15 s transport timeout, not 120 s: on app exit the worker must
+             * notice within ~15 s and unwind, otherwise the UI thread blocks in
+             * podcast_controller_deinit()'s wait loop. A continuously flowing
+             * download is unaffected — this only fires when the connection is
+             * fully stalled (no data for 15 s). */
+            .timeout_ms = 15000,
             .buffer_size = 16384,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .max_redirection_count = 0,
@@ -378,7 +383,7 @@ bool http_download_to_file(const char *url, const char *file_path,
                     /* Marker placed AFTER the first SD write: if the log ends at
                      * "streaming started" without this line, the transfer is
                      * blocked in fwrite (SD/exFAT write) — not in the network
-                     * read (which has a 120 s transport timeout). */
+                     * read (which has a 15 s transport timeout). */
                     ESP_LOGI(TAG, "dl: first chunk written (%d bytes)", n);
                     first_chunk = false;
                 }

@@ -29,6 +29,12 @@ void launcher_open_app(const char *app_name)
 void launcher_on_app_close(void)
 {
     ESP_LOGI(TAG, "App closed, returning to home");
+    /* The app's screen is never deleted by page_navigator_deinit/stop_func, so
+     * delete it here — this fires each page's LV_EVENT_DELETE cleanup and stops
+     * any timers that would otherwise outlive the app (heap corruption on the
+     * next session). */
+    lv_obj_t *scr = lv_screen_active();
+    if (scr) lv_obj_delete_async(scr);
     launcher_home_ui();
 }
 
@@ -38,6 +44,10 @@ void launcher_return_home(void)
 
     /* Kill current app */
     app_manager_delete();
+
+    /* Delete the app's screen (see launcher_on_app_close). */
+    lv_obj_t *scr = lv_screen_active();
+    if (scr) lv_obj_delete_async(scr);
 
     /* Reload home screen */
     launcher_home_ui();

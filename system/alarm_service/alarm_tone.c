@@ -1,11 +1,22 @@
 /*
  * NomadCast — Alarm ringtone (I2S sine beep)
  *
- * Drives the ES8156 DAC directly via a second I2S controller (I2S_NUM_1, so it
- * never collides with audio_player's I2S_NUM_0) on the same pins. 880 Hz sine,
- * 500 ms on / 500 ms off, until alarm_tone_stop(). ES8156 needs a master clock,
- * so MCLK (GPIO1) is driven at the default 256× sample-rate ratio — the same
- * arrangement audio_player uses.
+ * Drives the ES8156 DAC directly over the SAME I2S controller the audio
+ * player uses (I2S_NUM_0), on the same pins (MCLK=GPIO13, BCLK=GPIO12,
+ * WS=GPIO10, DOUT=GPIO11).  alarm_service_ring() tears down the audio player
+ * (audio_player_stop) before ringing, and alarm_tone_stop() runs before
+ * playback resumes, so the two are never active at the same time.
+ *
+ * Using a *second* controller (I2S_NUM_1) on those same physical pins was a
+ * bug: two I2S controllers cannot own the same GPIO pins.  After the alarm
+ * tone tore down I2S1 and revoked the pins, the next audio_player_play() on
+ * I2S0 left the ESP32-S3 GPIO matrix / I2S clock state inconsistent and
+ * crashed (reboot), which is exactly the "alarm rings → dismiss → play →
+ * whole UI restarts" report.
+ *
+ * 880 Hz sine, 500 ms on / 500 ms off, until alarm_tone_stop().  ES8156 needs
+ * a master clock, so MCLK (GPIO13) is driven at the default 256× sample-rate
+ * ratio — the same arrangement audio_player uses.
  */
 
 #include <string.h>
@@ -76,7 +87,7 @@ void alarm_tone_start(void)
 {
     if (s_running) return;
 
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     if (i2s_new_channel(&chan_cfg, &s_tx, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "i2s_new_channel failed");

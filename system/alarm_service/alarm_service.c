@@ -21,6 +21,7 @@
 #include "alarm_service.h"
 #include "alarm_tone.h"
 #include "flash_store.h"
+#include "clock.h"
 #include "sleep_monitor.h"
 #include "audio_player.h"
 #include "lv_bottom_sheet.h"
@@ -46,6 +47,12 @@ static int    s_ringing_index = -1;  /* alarm currently ringing (for snooze) */
 /* Survives deep sleep — the alarm index armed before shutdown. RTC_DATA_ATTR is
  * initialized on cold boot and retained across deep-sleep wakes. */
 static RTC_DATA_ATTR int32_t s_pending_index = -1;
+
+/* Tracks whether the wall clock was trusted the last time alarm_service_process
+ * ran.  Used to detect the SNTP "rising edge" so a freshly-synced clock forces a
+ * recompute of s_next_fire (the pre-sync 1970-based value would otherwise fire
+ * every alarm as soon as the clock jumps to the real epoch). */
+static bool s_was_synced = false;
 
 /* Dismiss popup (global overlay, shown regardless of running app). */
 static lv_bottom_sheet_t *s_sheet = NULL;
@@ -293,7 +300,13 @@ static void alarm_service_trigger(int idx)
 void alarm_service_init(void)
 {
     alarm_service_load();
-    s_next_fire = compute_next_fire();
+
+    /* The wall clock is only trustworthy after SNTP.  Until then time(NULL) is
+     * the boot default (1970), so computing s_next_fire now would arm stale
+     * "future" epochs that fire the instant the clock jumps forward.  Leave it
+     * unarmed and let alarm_service_process re-arm on the synced rising edge. */
+    s_was_synced = clock_is_synced();
+    s_next_fire = s_was_synced ? compute_next_fire() : 0;
 
     /* Timer wakeup from deep sleep → the armed alarm is due now. */
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER &&
@@ -372,6 +385,19 @@ void alarm_service_reset(void)
 
 void alarm_service_process(void)
 {
+    bool synced = clock_is_synced();
+
+    /* SNTP just synced → the wall clock jumped forward.  Recompute against the
+     * now-correct time; any s_next_fire computed before sync is stale and would
+     * otherwise fire immediately as "overdue". */
+    if (synced && !s_was_synced) {
+        s_next_fire = compute_next_fire();
+    }
+    s_was_synced = synced;
+
+    /* Never fire on an untrusted clock. */
+    if (!synced) return;
+
     time_t now = time(NULL);
 
     /* Snooze pending → wait for the snooze deadline, not the real schedule. */

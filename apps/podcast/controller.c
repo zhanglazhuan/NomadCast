@@ -260,6 +260,10 @@ static void artwork_worker_task(void *arg) {
             int ok = 0;
             ESP_LOGI(TAG, "artwork worker: downloading %d images", n);
             for (int i = 0; i < n; i++) {
+                /* App exiting (deinit cleared art.running): stop scheduling
+                 * more downloads so this worker unwinds promptly instead of
+                 * churning through the whole batch. */
+                if (!c->art.running) break;
                 if (cache_artwork_download(jobs[i].collection_id, jobs[i].url))
                     ok++;
             }

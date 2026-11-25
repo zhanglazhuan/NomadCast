@@ -532,6 +532,14 @@ static int pb_find_or_create(int episode_id, int channel_id) {
 
 void cache_playback_init(struct PodcastApp *app) {
     (void)app;
+    /* Reset the in-memory store before rebuilding it from disk.  This runs once
+     * per app start; the previous session's entries are already persisted to
+     * playback.json.  Without resetting g_pb_count, the fill loop below writes
+     * g_pb_entries[g_pb_count++] past the freshly calloc'd array (g_pb_count
+     * still holds the previous session's value) and corrupts the heap. */
+    if (g_pb_entries) { free(g_pb_entries); g_pb_entries = NULL; }
+    g_pb_count = 0;
+    g_pb_cap   = 0;
     ensure_dir("/sdcard/.nomadcast/");
 
     FILE *f = fopen(PB_PATH, "rb");
