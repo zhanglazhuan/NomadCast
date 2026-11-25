@@ -58,6 +58,7 @@ typedef struct DownloadTaskPageCtx_s {
 static DownloadTaskPageCtx *s_active_dl_page = NULL;
 static lv_timer_t *s_dl_refresh_timer = NULL;   /* 单例：500ms 刷新下载百分比 */
 static uint32_t s_dl_eta_tick = 0;              /* ETA 刷新节拍计数（500ms/拍） */
+static bool s_dl_evt_registered = false;        /* download-complete 监听器只注册一次 */
 
 static void dl_prev_page(lv_event_t *e);
 static void dl_next_page(lv_event_t *e);
@@ -694,10 +695,9 @@ static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_dat
     (void)user_data;
     Page page = lv_page_create(tr(STR_DOWNLOAD_TASK), true, page_navigator_navigate_back, &app->view->page_nav);
 
-    static bool evt_registered = false;
-    if (!evt_registered) {
+    if (!s_dl_evt_registered) {
         app_event_register(on_download_complete_event);
-        evt_registered = true;
+        s_dl_evt_registered = true;
         printf("[dl_task] registered download-complete listener\n"); fflush(stdout);
     }
 
@@ -762,4 +762,22 @@ static lv_obj_t* build_download_task_page(struct PodcastApp* app, void* user_dat
 
 void podcast_view_download_task_init_registry(struct PodcastApp* app) {
     PAGE_REGISTE(app, PAGE_DOWNLOAD_TASK, build_download_task_page);
+}
+
+/* Tear down the singleton refresh timer and the once-registered listener when
+ * the app stops.  Without this the 500ms timer and the download-complete
+ * listener survive the app (they're not tied to a page LV_EVENT_DELETE), so on
+ * the next session the timer would keep ticking against a stale s_active_dl_page.
+ * Called synchronously from podcast_view_deinit — NOT via LV_EVENT_DELETE, which
+ * races with lv_obj_delete_async on navigation. */
+void podcast_view_download_task_deinit(void) {
+    if (s_dl_refresh_timer) {
+        lv_timer_del(s_dl_refresh_timer);
+        s_dl_refresh_timer = NULL;
+    }
+    if (s_dl_evt_registered) {
+        app_event_unregister(on_download_complete_event);
+        s_dl_evt_registered = false;
+    }
+    s_active_dl_page = NULL;
 }
