@@ -34,6 +34,7 @@
 #include "aac_decoder.h"
 #include "esp_decoder.h"
 #include "audio_player.h"
+#include "play_history.h"
 #include "driver/i2c_master.h"
 #include "es8156.h"
 #include "app_event.h"
@@ -101,6 +102,8 @@ typedef struct {
     int resume_sec;
     int64_t resume_byte;
     int last_time_sec;
+    int base_sec;               /* absolute position at which the current playback
+                                 * started (resume offset); 0 for a fresh play */
     int duration_sec;           /* true stream duration from the decoder (0 until known) */
     char uri[2600];
     char esp_uri[2600];
@@ -279,6 +282,12 @@ static bool pipeline_build(void)
     } else {
         fatfs_stream_cfg_t fs = FATFS_STREAM_CFG_DEFAULT();
         fs.type = AUDIO_STREAM_READER;
+        /* The fatfs reader defaults to an internal-DRAM task stack (4KB). With
+         * the UI/model competing for internal DRAM the largest free block can
+         * drop below 4KB, so xTaskCreate fails and audio_pipeline_resume fails
+         * (the "stuck" symptom). Put the reader stack in PSRAM like the decoder/
+         * softvol/i2s elements — ADF's own http_stream does the same. */
+        fs.ext_stack = true;
         reader = fatfs_stream_init(&fs);
     }
     if (!reader) { ESP_LOGE(TAG, "reader init failed"); goto fail; }
@@ -343,7 +352,11 @@ static void pipeline_teardown(void)
 {
     if (s_player.pipeline) {
         audio_pipeline_stop(s_player.pipeline);
-        audio_pipeline_wait_for_stop(s_player.pipeline);
+        /* Bounded wait: a stuck decoder task may never report STOPPED, and the
+         * default audio_pipeline_wait_for_stop() blocks with portMAX_DELAY,
+         * freezing the UI. Time out after 2s and let audio_pipeline_deinit()
+         * force-delete the zombie task below. */
+        audio_pipeline_wait_for_stop_with_ticks(s_player.pipeline, pdMS_TO_TICKS(2000));
         if (s_player.events) audio_pipeline_remove_listener(s_player.pipeline);
     }
     if (s_player.events) {
@@ -492,12 +505,16 @@ void audio_player_headphone_detect_init(void)
 /* ── Helpers ──────────────────────────────────────────────────────────── */
 
 static void capture_position(void) {
-    /* Time position from I2S output (PCM bytes → seconds) */
+    /* Time position from I2S output (PCM bytes → seconds).  I2S counts from the
+     * start of THIS pipeline, so add base_sec — the resume offset — to get the
+     * absolute track position (a resumed file otherwise reports 0 at its 9s
+     * point, making the progress bar count up from 0 instead of resuming). */
     if (s_player.i2s) {
         audio_element_info_t info = {0};
         if (audio_element_getinfo(s_player.i2s, &info) == ESP_OK && info.sample_rates) {
-            s_player.resume_sec = (int)(info.byte_pos / (info.sample_rates *
-                                   info.channels * (info.bits / 8)));
+            s_player.resume_sec = s_player.base_sec +
+                (int)(info.byte_pos / (info.sample_rates *
+                                       info.channels * (info.bits / 8)));
             s_player.last_time_sec = s_player.resume_sec;
         }
     }
@@ -513,6 +530,220 @@ static void capture_position(void) {
             s_player.resume_byte = info.byte_pos;
         }
     }
+}
+
+/* Case-insensitive check that `path` ends in the given extension (dot included). */
+static bool path_has_ext(const char *path, const char *ext) {
+    if (!path || !ext) return false;
+    const char *dot = strrchr(path, '.');
+    if (!dot) return false;
+    size_t plen = strlen(dot), elen = strlen(ext);
+    if (plen != elen) return false;
+    for (size_t i = 0; i < elen; i++) {
+        char a = dot[i], b = ext[i];
+        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        if (a != b) return false;
+    }
+    return true;
+}
+
+/* Classify a local audio file by sniffing its leading bytes.  The on-SD
+ * extension is unreliable: the downloader names every file `.aac`, but the
+ * bytes can be a remuxed AAC-ADTS stream, a raw-copied MP3, or an MP4/M4A
+ * container whose remux fell back to `mp4_copy_file`.  The decoder sniffs
+ * content too, so resume must route by content — not extension — or a MP4
+ * mislabelled `.aac` gets ADTS-align-seeked and stalls. */
+typedef enum {
+    LOCAL_CODEC_UNKNOWN = 0,
+    LOCAL_CODEC_ADTS,
+    LOCAL_CODEC_MP4,
+    LOCAL_CODEC_MP3,
+} local_codec_t;
+
+static local_codec_t sniff_local_codec(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return LOCAL_CODEC_UNKNOWN;
+    unsigned char b[16];
+    size_t n = fread(b, 1, sizeof(b), f);
+    fclose(f);
+
+    /* MP4/M4A container: an ISO box header — type at offset 4. */
+    if (n >= 8) {
+        if (memcmp(b + 4, "ftyp", 4) == 0 || memcmp(b + 4, "moov", 4) == 0 ||
+            memcmp(b + 4, "mdat", 4) == 0 || memcmp(b + 4, "free", 4) == 0 ||
+            memcmp(b + 4, "wide", 4) == 0 || memcmp(b + 4, "skip", 4) == 0 ||
+            memcmp(b + 4, "styp", 4) == 0 || memcmp(b + 4, "moof", 4) == 0 ||
+            memcmp(b + 4, "sidx", 4) == 0)
+            return LOCAL_CODEC_MP4;
+    }
+
+    /* MP3 with an ID3v2 tag prepended. */
+    if (n >= 3 && memcmp(b, "ID3", 3) == 0) return LOCAL_CODEC_MP3;
+
+    /* ADTS AAC: 0xFFF sync, layer bits 00 (b[1] in {0xF0,0xF1,0xF8,0xF9}). */
+    if (n >= 2 && b[0] == 0xFF && (b[1] & 0xF6) == 0xF0) return LOCAL_CODEC_ADTS;
+
+    /* MP3 without ID3: 0xFFE sync (b[1] top 3 bits set, layer bits non-zero). */
+    if (n >= 2 && b[0] == 0xFF && (b[1] & 0xE0) == 0xE0) return LOCAL_CODEC_MP3;
+
+    return LOCAL_CODEC_UNKNOWN;
+}
+
+/* Align `*byte_pos` forward to the start of the next ADTS frame in `path`.
+ * The reader's saved byte_pos is a block boundary — i.e. mid-frame — and the
+ * precompiled AAC decoder does NOT resync to an arbitrary offset: fed mid-frame
+ * data it stalls (reads ahead while producing 0 PCM, the "卡住" state).  ADTS
+ * frames are self-describing (12-bit 0xFFF sync + 13-bit frame_length), so scan
+ * forward for a sync word whose following frame also starts with a sync — that
+ * confirms a true frame boundary.  The next frame is within one frame length
+ * (<= 8191 bytes) of the block boundary, so the scan is bounded to a small
+ * window: never walk the whole file (a 10+ MB scan stalls the UI thread for
+ * tens of seconds and false-positives on non-ADTS content). */
+static bool align_adts_frame(const char *path, int64_t *byte_pos) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+
+    const int64_t k_window = 64 * 1024;
+    int64_t chunk_off = *byte_pos;
+    int64_t limit = *byte_pos + k_window;
+    unsigned char buf[1024];
+
+    while (chunk_off < limit) {
+        if (fseek(f, chunk_off, SEEK_SET) != 0) break;
+        size_t n = fread(buf, 1, sizeof(buf), f);
+        if (n < 8) break;
+
+        for (size_t i = 0; i + 7 <= n; i++) {
+            /* 12-bit sync + layer==00 (matches aac_file_probe's mask). */
+            if (buf[i] != 0xFF || (buf[i + 1] & 0xF6) != 0xF0) continue;
+
+            /* 13-bit frame length (ADTS header bits 30-43). */
+            int flen = ((buf[i + 3] & 0x03) << 11) | (buf[i + 4] << 3) | (buf[i + 5] >> 5);
+            if (flen < 7 || flen > 8191) continue;   /* implausible frame header */
+
+            /* Confirm: the NEXT frame must also begin with a sync word. */
+            int64_t next = chunk_off + (int64_t)i + flen;
+            if (fseek(f, next, SEEK_SET) == 0) {
+                unsigned char h2[2];
+                if (fread(h2, 1, 2, f) == 2 &&
+                    h2[0] == 0xFF && (h2[1] & 0xF6) == 0xF0) {
+                    *byte_pos = chunk_off + (int64_t)i;
+                    fclose(f);
+                    return true;
+                }
+            }
+        }
+
+        if (n < sizeof(buf)) break;               /* EOF */
+        chunk_off += (int64_t)(n - 7);            /* overlap so a straddling sync is caught */
+    }
+
+    fclose(f);
+    return false;
+}
+
+/* Seek a freshly-built local-file pipeline forward to s_player.resume_byte.
+ * The auto-detect decoder must first read the container header to pick the
+ * codec, so the reader opens at position 0, the decoder consumes the header,
+ * and only then do we drop the buffered header bytes and seek the reader. */
+static void apply_local_byte_seek(void) {
+    if (s_player.resume_byte <= 0) return;
+    if (strncmp(s_player.esp_uri, "http", 4) == 0) return;
+
+    /* Route by sniffed CONTENT, not the on-SD extension (the downloader names
+     * every file `.aac`, but a remux-failure fallback leaves MP4 or MP3 bytes
+     * under that name). */
+    local_codec_t codec = sniff_local_codec(s_player.uri);
+
+    /* MP4 containers (M4A/MP4/M4B): ADF's precompiled AAC decoder is a
+     * positional stream parser — frame boundaries come from the moov sample
+     * table and the data is consumed sequentially, so it cannot resync to an
+     * arbitrary compressed byte offset.  Seeking the reader mid-atom/mid-frame
+     * makes it error and stall: the reader reads ahead while no PCM is ever
+     * produced.  The codec lib exposes no seek API, so byte-offset resume is
+     * unsupported for these files — play from the start instead. */
+    if (codec == LOCAL_CODEC_MP4 ||
+        path_has_ext(s_player.uri, ".m4a") ||
+        path_has_ext(s_player.uri, ".mp4") ||
+        path_has_ext(s_player.uri, ".m4b")) {
+        ESP_LOGI(TAG, "resume: %s is MP4 (byte-seek unsupported), play from 0",
+                 s_player.uri);
+        s_player.resume_byte = 0;
+        s_player.resume_sec  = 0;
+        return;
+    }
+
+    /* ADTS (.aac): the saved byte offset is a block boundary, not a frame
+     * boundary.  The precompiled AAC decoder does not resync to an arbitrary
+     * offset and stalls (reads ahead, 0 PCM) when fed mid-frame data — align
+     * forward to the next clean frame start so the seek lands on a decodable
+     * frame.  If no boundary is found (corrupt / non-ADTS content), play from
+     * the start rather than stall. */
+    if (codec == LOCAL_CODEC_ADTS) {
+        int64_t aligned = s_player.resume_byte;
+        if (align_adts_frame(s_player.uri, &aligned)) {
+            if (aligned != s_player.resume_byte)
+                ESP_LOGI(TAG, "resume: ADTS frame aligned %lld -> %lld",
+                         (long long)s_player.resume_byte, (long long)aligned);
+            s_player.resume_byte = aligned;
+        } else {
+            ESP_LOGW(TAG, "resume: no ADTS boundary near %lld, play from 0",
+                     (long long)s_player.resume_byte);
+            s_player.resume_byte = 0;
+            s_player.resume_sec  = 0;
+        }
+    }
+
+    /* MP3 (sync-word resync) and other tolerant formats keep the raw byte-offset
+     * seek below.  UNKNOWN content also keeps the offset: the decoder sniffs it
+     * too, and resetting to 0 for an unknown-but-seekable format would lose the
+     * resume position for no reason. */
+
+    audio_element_handle_t reader  = audio_pipeline_get_el_by_tag(s_player.pipeline, "reader");
+    audio_element_handle_t decoder = audio_pipeline_get_el_by_tag(s_player.pipeline, "decoder");
+    if (!reader || !decoder) return;
+
+    /* Wait until the decoder has finished opening (state RUNNING), so the
+     * codec is set and detection has consumed the header. */
+    for (int i = 0; i < 300; i++) {
+        audio_element_state_t st = audio_element_get_state(decoder);
+        if (st == AEL_STATE_RUNNING) break;
+        if (st == AEL_STATE_ERROR || st == AEL_STATE_STOPPED ||
+            st == AEL_STATE_FINISHED) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    /* audio_element_setinfo only writes the byte_pos FIELD — the real file
+     * seek happens inside _fatfs_open on (re)open. So pause (close) the reader,
+     * set the offset, drop the header bytes already fed into the decoder's
+     * input, then resume (reopen) it. */
+    audio_element_pause(reader);
+    audio_element_reset_input_ringbuf(decoder);
+    audio_element_info_t info = {0};
+    audio_element_getinfo(reader, &info);
+    info.byte_pos = s_player.resume_byte;
+    audio_element_setinfo(reader, &info);
+    audio_element_resume(reader, 0.0f, portMAX_DELAY);
+}
+
+/* Persist the current local-file position to the playback history, so the next
+ * play() of the same path resumes where the user left off.  Only called from
+ * stop()/pause() on the LVGL/app task (never an ADF element task). */
+static void persist_position_if_local(void) {
+    if (!audio_player_is_local_source()) return;
+    if (s_player.resume_byte <= 0) return;
+
+    /* Finished (within 3s of the end): drop the entry so the next play starts
+     * from 0 rather than seeking to a byte offset at EOF. */
+    if (s_player.duration_sec > 0 &&
+        s_player.resume_sec >= s_player.duration_sec - 3) {
+        play_history_remove(s_player.uri);
+        play_history_save();
+        return;
+    }
+
+    play_history_upsert(s_player.uri, s_player.resume_byte, s_player.resume_sec);
+    play_history_save();
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */
@@ -576,19 +807,55 @@ bool audio_player_play(const char *url) {
         return s_player.playing;
     }
 
+    /* Record the currently-playing file before switching away to the new one.
+     * Without this, playing B right after A drops A's resume position from the
+     * history — the switch path never went through stop()/pause(true). */
+    if (s_player.pipeline) {
+        capture_position();
+        persist_position_if_local();
+    }
+
     pipeline_teardown();
     s_player.released      = false;
     s_player.resume_sec    = 0;
     s_player.resume_byte   = 0;
     s_player.last_time_sec = 0;
+    s_player.base_sec      = 0;
     s_player.duration_sec  = 0;
     to_esp_uri(url, s_player.esp_uri, sizeof(s_player.esp_uri));
     strncpy(s_player.uri, url, sizeof(s_player.uri) - 1);
 
+    /* Resume a previously-played local file from its saved byte offset. */
+    if (audio_player_is_local_source()) {
+        play_history_entry_t e;
+        if (play_history_find(url, &e) && e.resume_byte > 0) {
+            s_player.resume_byte = e.resume_byte;
+            s_player.resume_sec  = e.resume_sec;
+            ESP_LOGI(TAG, "play: resume from history (byte %lld, ~%ds)",
+                     (long long)e.resume_byte, e.resume_sec);
+        }
+    }
+
     if (!pipeline_build()) return false;
 
     audio_pipeline_run(s_player.pipeline);
+    apply_local_byte_seek();
+    /* The I2S position counts from 0 regardless of where the reader was seeked,
+     * so record the resume offset as the base and add it to every position read
+     * (get_position_sec/capture_position) to report the absolute track time. */
+    s_player.base_sec      = s_player.resume_sec;
+    s_player.last_time_sec = s_player.resume_sec;
     s_player.playing = true;
+
+    /* Record the new file immediately so it appears in "最近播放" even before
+     * any stop/pause, and so a resumed file moves back to the top of the list.
+     * For a fresh play resume_byte is 0 (list shows 0:00); stop/pause/switch
+     * later overwrite it with the real position. */
+    if (audio_player_is_local_source()) {
+        play_history_upsert(url, s_player.resume_byte, s_player.resume_sec);
+        play_history_save();
+    }
+
     log_memory("play");
     ESP_LOGI(TAG, "play: %s", s_player.esp_uri);
     return true;
@@ -596,10 +863,12 @@ bool audio_player_play(const char *url) {
 
 void audio_player_stop(void) {
     capture_position();
+    persist_position_if_local();
     pipeline_teardown();
     s_player.released    = false;
     s_player.resume_sec  = 0;
     s_player.resume_byte = 0;
+    s_player.base_sec    = 0;
     s_player.duration_sec = 0;
 }
 
@@ -607,6 +876,7 @@ void audio_player_pause(bool pause) {
     if (pause) {
         if (!s_player.pipeline) return;
         capture_position();          /* save decoder byte offset + i2s time */
+        persist_position_if_local();
         /* Pause only the sink.  ADF's pipeline pause propagates a reset-like
          * command into the M4A/AAC decoder; resuming then re-runs container
          * detection at a compressed offset and can fail with decoder error 560.
@@ -653,34 +923,11 @@ void audio_player_pause(bool pause) {
 
         audio_pipeline_run(s_player.pipeline);
 
-        /* Transcoded HTTP streams resume by server-side time; local files can
-         * still seek by byte offset after decoder initialization. */
-        if (s_player.resume_byte > 0 && strncmp(s_player.esp_uri, "http", 4) != 0) {
-            audio_element_handle_t reader  = audio_pipeline_get_el_by_tag(s_player.pipeline, "reader");
-            audio_element_handle_t decoder = audio_pipeline_get_el_by_tag(s_player.pipeline, "decoder");
-            if (reader && decoder) {
-                /* Wait until the decoder has finished opening (state RUNNING),
-                 * so the codec is set and detection has consumed the header. */
-                for (int i = 0; i < 300; i++) {
-                    audio_element_state_t st = audio_element_get_state(decoder);
-                    if (st == AEL_STATE_RUNNING) break;
-                    if (st == AEL_STATE_ERROR || st == AEL_STATE_STOPPED ||
-                        st == AEL_STATE_FINISHED) break;
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                }
-                /* audio_element_setinfo only writes the byte_pos FIELD — the real
-                 * file seek happens inside _fatfs_open on (re)open. So pause
-                 * (close) the reader, set the offset, drop the header bytes it
-                 * already fed into the decoder's input, then resume (reopen) it. */
-                audio_element_pause(reader);
-                audio_element_reset_input_ringbuf(decoder);
-                audio_element_info_t info = {0};
-                audio_element_getinfo(reader, &info);
-                info.byte_pos = s_player.resume_byte;
-                audio_element_setinfo(reader, &info);
-                audio_element_resume(reader, 0.0f, portMAX_DELAY);
-            }
-        }
+        /* Transcoded HTTP streams resume by server-side time; local files seek
+         * by byte offset after decoder initialization. */
+        apply_local_byte_seek();
+        s_player.base_sec      = s_player.resume_sec;
+        s_player.last_time_sec = s_player.resume_sec;
         s_player.released = false;
         s_player.playing  = true;
         log_memory("resume-rebuild");
@@ -762,8 +1009,9 @@ int audio_player_get_position_sec(void) {
     if (s_player.pipeline && s_player.playing && s_player.i2s) {
         audio_element_info_t info = {0};
         if (audio_element_getinfo(s_player.i2s, &info) == ESP_OK && info.sample_rates) {
-            s_player.last_time_sec = (int)(info.byte_pos / (info.sample_rates *
-                                      info.channels * (info.bits / 8)));
+            s_player.last_time_sec = s_player.base_sec +
+                (int)(info.byte_pos / (info.sample_rates *
+                                       info.channels * (info.bits / 8)));
         }
         /* Detect finish: if i2s element stopped, mark playing = false */
         audio_element_state_t st = audio_element_get_state(s_player.i2s);

@@ -17,6 +17,7 @@
 #include "subpages/view_settings.h"
 #include "subpages/view_download_task.h"
 #include "subpages/view_login.h"
+#include "subpages/view_recently_played.h"
 
 // 全局应用实例
 extern PodcastApp g_podcast_app;
@@ -43,8 +44,9 @@ void podcast_view_init(struct PodcastApp* app) {
     podcast_view_settings_init_registry(app);
     podcast_view_download_task_init_registry(app);
     podcast_view_login_init_registry(app);
+    podcast_view_recently_played_init_registry(app);
 
-    printf("[INF] podcast_view_init done (10 subpages registered)\n");
+    printf("[INF] podcast_view_init done (11 subpages registered)\n");
 }
 
 void podcast_view_deinit(struct PodcastApp* app) {

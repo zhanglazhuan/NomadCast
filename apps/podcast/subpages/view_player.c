@@ -67,9 +67,12 @@ static void player_pos_timer_cb(lv_timer_t *timer) {
         }
         /* Option 1: write the real duration back so the episode lists stop
          * showing the wrong feed itunes:duration.  Update both the transient
-         * network stores and (for a downloaded episode) the persisted bucket. */
-        podcast_model_update_episode_duration(&g_podcast_app, ctx->episode_id, real_dur);
-        cache_local_update_duration(&g_podcast_app, ctx->episode_id, real_dur);
+         * network stores and (for a downloaded episode) the persisted bucket.
+         * (Episode flow only — raw-path has episode_id == 0.) */
+        if (ctx->episode_id > 0) {
+            podcast_model_update_episode_duration(&g_podcast_app, ctx->episode_id, real_dur);
+            cache_local_update_duration(&g_podcast_app, ctx->episode_id, real_dur);
+        }
     }
 
     if (pos > ctx->duration && ctx->duration > 0) pos = ctx->duration;
@@ -82,8 +85,10 @@ static void player_pos_timer_cb(lv_timer_t *timer) {
     if (lv_obj_is_valid(ctx->time_label))
         lv_label_set_text(ctx->time_label, buf);
 
-    /* Periodic save: every 5 seconds */
-    if (pos > 0 && (pos - ctx->last_saved >= 5 || pos < ctx->last_saved)) {
+    /* Periodic save: every 5 seconds (episode flow only — raw-path resume
+     * position is tracked separately by the audio_player play_history). */
+    if (ctx->episode_id > 0 &&
+        pos > 0 && (pos - ctx->last_saved >= 5 || pos < ctx->last_saved)) {
         ctx->last_saved = pos;
         cache_playback_set_position(ctx->episode_id, ctx->channel_id,
                                     pos, ctx->duration);
@@ -498,36 +503,77 @@ static void fmt_time(int sec, char* buf, int sz) {
 }
 
 static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
-    /* Determine whether we came from a channel episode (have user_data) or
-     * from the tab bar (no user_data).  Only show the back button when
-     * navigating from channel → player so the user can return to channel. */
+    /* Determine whether we came from a pushed page (channel or recently-played,
+     * have user_data) or from the tab bar (no user_data). Only show the back
+     * button when navigating from a pushed page so the user can return. */
     bool from_channel = (user_data != NULL);
 
-    int eid = 0;
-    if (user_data) {
-        eid = *(int*)user_data;
-        free(user_data);
-        /* New episode selected — start playback */
-        if (eid > 0) podcast_controller_play_episode(app, eid);
+    player_open_arg_t *arg = (player_open_arg_t *)user_data;
+    int  eid = 0;
+    bool is_raw = false;
+    const char *raw_path = NULL;
+    if (arg) {
+        if (arg->episode_id > 0) {
+            eid = arg->episode_id;
+        } else if (arg->path[0]) {
+            raw_path = arg->path;
+            is_raw   = true;
+        }
     }
+
+    /* A local file path (Recently Played) is played directly — it has no episode
+     * record to hand to the episode-keyed player. */
+    if (eid > 0) {
+        podcast_controller_play_episode(app, eid);
+    } else if (is_raw) {
+        hal_audio_play_file(raw_path);          /* resumes from play_history */
+        podcast_model_set_playing(app, true);
+    }
+
+    /* Derive the display title from the raw path while it is still valid. */
+    char raw_title[256];
+    if (is_raw) {
+        const char *base = strrchr(raw_path, '/');
+        base = base ? base + 1 : raw_path;
+        /* Bounded copy: raw_path is 2560 bytes, raw_title only 256. */
+        snprintf(raw_title, sizeof(raw_title), "%.*s",
+                 (int)sizeof(raw_title) - 1, base);
+        char *dot = strrchr(raw_title, '.');
+        if (dot && dot != raw_title) *dot = '\0';
+    }
+
+    if (arg) free(arg);
+    arg = NULL; raw_path = NULL;
+
     /* Fallback: no user_data means we're coming from tab bar — show what's playing */
-    if (eid == 0) eid = podcast_model_get_current_episode_id(app);
+    if (eid == 0 && !is_raw) eid = podcast_model_get_current_episode_id(app);
 
     const Episode* ep = podcast_model_get_episode_by_id(app, eid);
     const Channel* ch = ep ? podcast_model_get_channel_by_id(app, ep->channel_id) : NULL;
-    const char* tname = ep ? ep->title : tr(STR_NOTHING_PLAYING);
-    const char* tartist = ch ? ch->artist : "";
-    int duration = ep ? ep->duration_sec : 0;
+
+    const char* tname;
+    const char* tartist;
+    int duration;
+    if (is_raw) {
+        tname    = raw_title;
+        tartist  = "";
+        duration = 0;   /* filled by the decoder via the position poll timer */
+    } else {
+        tname    = ep ? ep->title : tr(STR_NOTHING_PLAYING);
+        tartist  = ch ? ch->artist : "";
+        duration = ep ? ep->duration_sec : 0;
+    }
 
     /* For a downloaded (local) file the feed duration can be wrong; trust the
-     * real M4A length so the progress bar and time labels match the audio. */
+     * real length so the progress bar and time labels match the audio.
+     * (Episode flow only — raw_path has no episode.)  The real duration is
+     * already persisted in the local library bucket at download/recovery time,
+     * so look it up from the in-RAM model — a full-file ADTS probe here froze
+     * the player page for seconds on every open. */
     char media[2560];
-    podcast_controller_media_for_episode(app, eid, media, sizeof(media));
-    if (strncmp(media, "/sdcard/", 8) == 0) {
-        int real = cache_local_file_duration(media);
-        printf("[DBG] player: feed_dur=%d media=%s real=%d\n",
-               duration, media, real);
-        fflush(stdout);
+    if (!is_raw) podcast_controller_media_for_episode(app, eid, media, sizeof(media));
+    if (!is_raw && strncmp(media, "/sdcard/", 8) == 0) {
+        int real = cache_local_duration_for_path(app, media);
         if (real > 0) duration = real;
     }
 
@@ -609,8 +655,9 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     pctx->episode_id = eid;
     pctx->channel_id = ep ? ep->channel_id : 0;
 
-    /* Restore saved position if resuming */
-    int saved_pos = cache_playback_get_position(eid);
+    /* Restore saved position if resuming (episode flow only — raw-path resume is
+     * handled inside audio_player via play_history byte offset, not here). */
+    int saved_pos = (eid > 0) ? cache_playback_get_position(eid) : 0;
     if (saved_pos > 0 && saved_pos < duration) {
         /* Resume from saved position — just show it on the bar.
          * Actual audio seek would need audio_player support. */

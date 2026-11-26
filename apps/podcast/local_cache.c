@@ -18,6 +18,7 @@
 #include "local_cache.h"
 #include "model.h"
 #include "app.h"
+#include "mp4_remux.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,9 +100,20 @@ static char *read_file(const char *path) {
 
 /* ── In-RAM model update (shared by add / load / migrate) ─────────────────── */
 
+static void local_audio_path(const char *ch_title, const char *ep_title,
+                             char *out, int out_sz);
+
+static const char *local_channel_title(struct PodcastApp *app, int chan_id) {
+    PodcastModel *m = app->model;
+    for (int j = 0; j < m->local_channel_count; j++)
+        if (m->local_channels[j].id == chan_id) return m->local_channels[j].title;
+    return NULL;
+}
+
 /* Add one episode to the model, keyed by canonical channel id. Dedups the
- * episode by stable audio_url and the channel by canon. Returns true if a NEW
- * episode was inserted (so the caller knows to persist that channel's bucket). */
+ * episode by stable audio_url, by (channel, title), and by the on-SD file path.
+ * Returns true if a NEW episode was inserted (so the caller knows to persist
+ * that channel's bucket). */
 static bool local_model_add(struct PodcastApp *app, int canon, int col,
                             const char *ch_title, int eid, const char *ep_title,
                             const char *url, int dur) {
@@ -121,6 +133,24 @@ static bool local_model_add(struct PodcastApp *app, int canon, int col,
             if (m->local_episodes[i].channel_id == canon &&
                 strcmp(m->local_episodes[i].title, ep_title) == 0)
                 return false;   /* dup */
+
+    /* Dedup by the derived on-SD path. The feed title may contain characters
+     * (:/? etc.) that get sanitized to '_' in the filename, so a recovered
+     * entry (title from the sanitized filename) compares unequal to a normal
+     * entry (raw feed title) above — yet both resolve to the SAME file. The
+     * path is the one identity that always matches, and it is also what makes
+     * two entries "the same episode" from the user's point of view. */
+    {
+        char cand_path[1536];
+        local_audio_path(ch_title, ep_title, cand_path, sizeof(cand_path));
+        for (int i = 0; i < m->local_episode_count; i++) {
+            const char *ct = local_channel_title(app, m->local_episodes[i].channel_id);
+            if (!ct) continue;
+            char ex_path[1536];
+            local_audio_path(ct, m->local_episodes[i].title, ex_path, sizeof(ex_path));
+            if (strcmp(cand_path, ex_path) == 0) return false;   /* same file */
+        }
+    }
 
     int en = m->local_episode_count + 1;
     Episode *ne = (Episode *)realloc(m->local_episodes, en * sizeof(Episode));
@@ -150,6 +180,22 @@ static bool local_model_add(struct PodcastApp *app, int canon, int col,
         m->local_channel_count = cn;
     }
     return true;
+}
+
+/* Does any indexed episode resolve to `path` on SD?  Mirrors local_model_add's
+ * path dedup so recovery can skip already-indexed files without re-probing them
+ * (a full-file probe on every app open is what made the Podcast app take minutes
+ * to launch). */
+static bool local_model_has_path(struct PodcastApp *app, const char *path) {
+    PodcastModel *m = app->model;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        const char *ct = local_channel_title(app, m->local_episodes[i].channel_id);
+        if (!ct) continue;
+        char ex[1536];
+        local_audio_path(ct, m->local_episodes[i].title, ex, sizeof(ex));
+        if (strcmp(ex, path) == 0) return true;
+    }
+    return false;
 }
 
 /* ── Bucket file I/O ──────────────────────────────────────────────────────── */
@@ -200,7 +246,7 @@ static void local_write_channel(struct PodcastApp *app, int canon) {
 static void parse_channel_buf(struct PodcastApp *app, const char *buf) {
     int canon = json_get_int(buf, "cid", 0);
     int col   = json_get_int(buf, "col", 0);
-    char ch_title[128];
+    char ch_title[256];
     json_get_str(buf, "ch", ch_title, sizeof(ch_title));
     if (canon <= 0) return;
 
@@ -252,7 +298,7 @@ static void local_audio_path(const char *ch_title, const char *ep_title,
 {
     char ch_safe[256], ep_safe[512];
     snprintf(ch_safe, sizeof(ch_safe), "%s", ch_title ? ch_title : "unknown");
-    snprintf(ep_safe, sizeof(ep_safe), "%s.m4a", ep_title ? ep_title : "audio");
+    snprintf(ep_safe, sizeof(ep_safe), "%s.aac", ep_title ? ep_title : "audio");
     for (char *p = ch_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
     for (char *p = ep_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
     snprintf(out, out_sz, DL_BASE_PATH "/%s/%s", ch_safe, ep_safe);
@@ -389,23 +435,64 @@ static bool mp4_probe(const char *path, int *duration_sec) {
 }
 
 /* Public complete-file check — lets the controller mark a network episode as
- * "downloaded" (green check) without exposing the box parser. */
+ * "downloaded" (green check) without exposing the box parser. Handles both the
+ * MP4/M4A container (moov sample table) and the remuxed AAC-ADTS stream. */
+static bool aac_head_is_adts(const char *path);   /* defined below */
+
 bool cache_local_file_complete(const char *path) {
-    return mp4_probe(path, NULL);
+    if (mp4_probe(path, NULL)) return true;
+    /* ADTS: existence + a valid frame head + non-zero size is enough. The .aac
+     * is only written after the download's remux completes (tmp+rename), so a
+     * present ADTS file is complete — no full-frame count, which froze the
+     * network channel page rendering the green check for a downloaded episode. */
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size > 0 && aac_head_is_adts(path)) return true;
+    return false;
 }
 
 int cache_local_file_duration(const char *path) {
     int dur = 0;
-    return mp4_probe(path, &dur) ? dur : 0;
+    if (mp4_probe(path, &dur)) return dur;
+    if (aac_file_probe(path, &dur)) return dur;
+    return 0;
+}
+
+int cache_local_duration_for_path(struct PodcastApp *app, const char *path) {
+    if (!app || !app->model || !path) return 0;
+    PodcastModel *m = app->model;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        const char *ct = local_channel_title(app, m->local_episodes[i].channel_id);
+        if (!ct) continue;
+        char ex[1536];
+        local_audio_path(ct, m->local_episodes[i].title, ex, sizeof(ex));
+        if (strcmp(ex, path) == 0) return m->local_episodes[i].duration_sec;
+    }
+    return 0;
+}
+
+/* Cheap ADTS sniff — reads only the first 7-byte frame header, not the whole
+ * file.  Distinguishes a genuine ADTS stream from an MP4-in-.aac leftover (whose
+ * first bytes are an 'ftyp'/'moov' box) without a full-file probe. */
+static bool aac_head_is_adts(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    unsigned char h[7];
+    if (fread(h, 1, 7, f) != 7) { fclose(f); return false; }
+    fclose(f);
+    if (h[0] != 0xFF || (h[1] & 0xF6) != 0xF0) return false;
+    uint32_t fl = ((uint32_t)(h[3] & 3) << 11) | ((uint32_t)h[4] << 3) |
+                  ((uint32_t)(h[5] >> 5) & 7);
+    return fl >= 7 && fl <= 8191;
 }
 
 /* Recover downloaded audio whose .meta bucket was lost (power cut before the
  * directory flush, or an SD card migrated without its index), or whose download
  * failed after the file was fully written (the task never registered the
- * episode). Scans the downloads tree and re-indexes any complete .m4a file
+ * episode). Scans the downloads tree and re-indexes any complete .aac file
  * missing from the local model — including individual episodes of a channel
- * that already exists. Metadata that can't be recovered from a filename (CDN
- * url, duration, collection id) is left empty/zero; playback still works
+ * that already exists. Legacy .m4a files (from before the ADTS remux) are
+ * remuxed to .aac on the way. Metadata that can't be recovered from a filename
+ * (CDN url, duration, collection id) is left empty/zero; playback still works
  * because the local path is re-derived from channel + episode titles. */
 static void recover_orphaned_downloads(struct PodcastApp *app) {
     PodcastModel *m = app->model;
@@ -452,24 +539,66 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
         while ((fde = readdir(cd)) != NULL) {
             if (fde->d_name[0] == '.') continue;
             size_t len = strlen(fde->d_name);
-            if (len < 5 || strcmp(fde->d_name + len - 4, ".m4a") != 0) continue;
-
-            /* Index only complete M4A files — skip empty and truncated ones.
-             * mp4_probe verifies the boxes tile to EOF, so a partial download
-             * (truncated mdat) is rejected even when moov sits at the front. */
-            char fpath[640];
-            snprintf(fpath, sizeof(fpath), "%s/%s", chdir, fde->d_name);
-            int dur = 0;
-            if (!mp4_probe(fpath, &dur)) continue;
+            bool is_aac = (len >= 5 && strcmp(fde->d_name + len - 4, ".aac") == 0);
+            bool is_m4a = (len >= 5 && strcmp(fde->d_name + len - 4, ".m4a") == 0);
+            if (!is_aac && !is_m4a) continue;
 
             char ep_title[256];
             snprintf(ep_title, sizeof(ep_title), "%.*s", (int)(len - 4), fde->d_name);
 
+            char aac_path[640];
+            snprintf(aac_path, sizeof(aac_path), "%s/%.*s.aac",
+                     chdir, (int)(len - 4), fde->d_name);
+
+            /* Fast path: an already-indexed episode needs no probe/remux — its
+             * duration is persisted in the channel bucket.  Re-probing would
+             * re-read the whole file on every app open (the "podcast app takes
+             * minutes to launch" bug). */
+            if (local_model_has_path(app, aac_path)) continue;
+
+            if (is_m4a) {
+                /* Legacy pre-remux file: convert MP4→ADTS so resume can seek.
+                 * Only a COMPLETE MP4 is migrated — a mid-download partial .m4a
+                 * (truncated mdat) is left for the download worker to resume. */
+                char fpath[640];
+                snprintf(fpath, sizeof(fpath), "%s/%s", chdir, fde->d_name);
+                int d = 0;
+                if (!mp4_probe(fpath, &d)) continue;   /* partial/incomplete — skip */
+                if (!mp4_remux_to_adts(fpath, aac_path, &d))
+                    mp4_copy_file(fpath, aac_path);
+                remove(fpath);          /* drop the source m4a once migrated */
+            } else {
+                /* An existing .aac that fails the ADTS probe but IS a complete
+                 * MP4 is a leftover from the old copy-fallback (or a naive
+                 * .m4a→.aac rename): the bytes are MP4, so byte-seek resume can
+                 * never work and the player would stall.  Re-remux it in place
+                 * so it becomes a genuinely seekable ADTS stream.  On failure,
+                 * leave it — the player now sniffs content and plays it from
+                 * the start instead of stalling. */
+                int d = 0;
+                if (!aac_head_is_adts(aac_path) && mp4_probe(aac_path, &d)) {
+                    char tmp[672];
+                    snprintf(tmp, sizeof(tmp), "%s.tmp", aac_path);
+                    printf("[DBG] recover: re-remux MP4-in-.aac %s\n", aac_path);
+                    fflush(stdout);
+                    if (mp4_remux_to_adts(aac_path, tmp, &d)) {
+                        remove(aac_path);
+                        if (rename(tmp, aac_path) != 0) remove(tmp);
+                    } else {
+                        remove(tmp);
+                    }
+                }
+            }
+
+            /* Index only complete ADTS files — skip empty/truncated ones. */
+            int dur = 0;
+            if (!aac_file_probe(aac_path, &dur)) continue;
+
             /* local_model_add dedups by (channel, title), so an episode already
              * indexed (normal download or a previous recovery) is skipped. */
             bool r_added = local_model_add(app, canon, col, ch_title,
-                                fnv1a_positive(fpath), ep_title, fpath, dur);
-            printf("[DBG] recover: file='%s' dur=%d added=%d\n", fpath, dur, r_added);
+                                fnv1a_positive(aac_path), ep_title, aac_path, dur);
+            printf("[DBG] recover: file='%s' dur=%d added=%d\n", aac_path, dur, r_added);
             fflush(stdout);
             if (r_added) added_any = true;
         }
@@ -495,7 +624,7 @@ static void migrate_old(struct PodcastApp *app) {
         int canon = (col > 0) ? col : cid;
         int eid = json_get_int(obj, "eid", 0);
         int dur = json_get_int(obj, "dur", 0);
-        static char ch_title[128], eptitle[256], url[1024];
+        static char ch_title[256], eptitle[256], url[1024];
         json_get_str(obj, "ch",  ch_title, sizeof(ch_title));
         json_get_str(obj, "ep",  eptitle,  sizeof(eptitle));
         json_get_str(obj, "url", url,      sizeof(url));
@@ -518,6 +647,11 @@ bool cache_local_has_episode(struct PodcastApp *app, int episode_id) {
     return false;
 }
 
+bool cache_local_has_path(struct PodcastApp *app, const char *path) {
+    if (!app || !app->model || !path || !path[0]) return false;
+    return local_model_has_path(app, path);
+}
+
 /* Drop local-list entries whose audio file is missing/empty/truncated.  Runs
  * after load + recovery so a failed download (or an earlier recovery that
  * indexed a partial file) doesn't leave a broken card in the Local page. */
@@ -536,19 +670,13 @@ static void prune_incomplete_local(struct PodcastApp *app) {
 
         char path[1536];
         local_audio_path(ch->title, e->title, path, sizeof(path));
-        int dur = 0;
-        if (mp4_probe(path, &dur)) {
-            if (dur > 0 && e->duration_sec != dur) {
-                printf("[DBG] prune: refresh id=%d ep='%s' %d -> %d\n",
-                       e->id, e->title, e->duration_sec, dur);
-                fflush(stdout);
-                e->duration_sec = dur;   /* refresh a wrong feed-provided duration */
-                changed = true;
-            } else {
-                printf("[DBG] prune: keep id=%d ep='%s' dur=%d (probe=%d)\n",
-                       e->id, e->title, e->duration_sec, dur);
-                fflush(stdout);
-            }
+        /* Cheap existence/size check — a full mp4_probe/aac_file_probe would
+         * re-read every download on each app open, stalling the UI thread for
+         * minutes.  Duration is already persisted at download/remux time, so it
+         * needs no refreshing here. */
+        struct stat st;
+        bool complete = (stat(path, &st) == 0 && st.st_size > 0);
+        if (complete) {
             if (write != i) m->local_episodes[write] = m->local_episodes[i];
             write++;
         } else {
@@ -651,18 +779,22 @@ void cache_local_add(struct PodcastApp *app,
      * box, so the player's progress bar doesn't end early while audio keeps
      * playing past the displayed end. */
     if (path && path[0]) {
-        int real_dur = 0;
-        if (mp4_probe(path, &real_dur) && real_dur > 0) {
+        int real_dur = cache_local_file_duration(path);
+        if (real_dur > 0) {
             printf("[DBG] cache_local_add: ep='%s' feed_dur=%d real_dur=%d\n",
                    ep_title ? ep_title : "", dur, real_dur);
             fflush(stdout);
             dur = real_dur;
         } else {
-            printf("[DBG] cache_local_add: ep='%s' probe fail (feed_dur=%d) -> hide\n",
+            printf("[DBG] cache_local_add: ep='%s' probe fail (feed_dur=%d) -> skip\n",
                    ep_title ? ep_title : "", dur);
             fflush(stdout);
-            dur = 0;   /* can't verify the real length — leave it unknown so the
-                        * list hides the duration instead of showing a stale feed value */
+            /* The recorded path has no complete, playable file behind it — a
+             * stale/truncated task record (or a failed remux). Adding it anyway
+             * forks a duplicate "identical" episode for the same real file (the
+             * 资讯早7点 bug). Recovery already indexes every real on-SD file, so
+             * skip instead of inserting a broken/duplicate row. */
+            return;
         }
     }
 

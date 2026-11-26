@@ -135,6 +135,8 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "点击登录",
     "播放时长",
     "下载数",
+    "最近播放",
+    "暂无最近播放",
 
     /* Podcast — search */
     "搜索",

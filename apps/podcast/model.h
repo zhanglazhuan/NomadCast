@@ -35,8 +35,10 @@ typedef struct {
     int     episode_id;
     int     channel_id;
     int     collection_id;
-    char    episode_title[128];
-    char    channel_title[128];
+    char    episode_title[256];   /* match Episode.title[256] — 128 truncated long
+                                     CJK titles mid-UTF-8, forking a duplicate
+                                     "identical" local episode (资讯早7点 bug) */
+    char    channel_title[256];   /* match Channel.title[256] */
     download_status_t status;
     int     progress;
     int     duration_sec;

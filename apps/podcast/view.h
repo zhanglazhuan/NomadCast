@@ -12,7 +12,7 @@ extern "C" {
 
 struct PodcastApp;
 
-#define PODCAST_PAGE_ID_MAX 11
+#define PODCAST_PAGE_ID_MAX 12
 
 enum podcast_page_id_t {
     PAGE_NONE = 0,
@@ -26,6 +26,7 @@ enum podcast_page_id_t {
     PAGE_SETTINGS,       // 8 — 设置页
     PAGE_DOWNLOAD_TASK,  // 9 — 下载任务页
     PAGE_LOGIN,          // 10 — 登录页
+    PAGE_RECENTLY_PLAYED, // 11 — 最近播放页
 };
 
 typedef struct PodcastView {
@@ -46,6 +47,7 @@ void podcast_view_profile_init_registry(struct PodcastApp* app);
 void podcast_view_settings_init_registry(struct PodcastApp* app);
 void podcast_view_download_task_init_registry(struct PodcastApp* app);
 void podcast_view_login_init_registry(struct PodcastApp* app);
+void podcast_view_recently_played_init_registry(struct PodcastApp* app);
 
 #ifdef __cplusplus
 } /* extern "C" */

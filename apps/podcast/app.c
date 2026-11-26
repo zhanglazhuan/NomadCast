@@ -47,7 +47,8 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
         for (int i = 0; i < m->download_task_count; i++) {
             DownloadTask *t = &m->download_tasks[i];
             if (t->status == DOWNLOAD_STATUS_COMPLETED && t->episode_id > 0 &&
-                !cache_local_has_episode(&g_podcast_app, t->episode_id)) {
+                !cache_local_has_episode(&g_podcast_app, t->episode_id) &&
+                !cache_local_has_path(&g_podcast_app, t->file_path)) {
                 cache_local_add(&g_podcast_app, t->channel_id, t->channel_title,
                                 t->episode_id, t->episode_title, t->audio_url,
                                 t->duration_sec, t->file_path, t->collection_id);

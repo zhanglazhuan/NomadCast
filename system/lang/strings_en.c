@@ -135,6 +135,8 @@ const char *const strings_en[STR_COUNT] = {
     "Tap to login",
     "Play Hours",
     "Downloads",
+    "Recently Played",
+    "No recent plays",
 
     /* Podcast — search */
     "Search",

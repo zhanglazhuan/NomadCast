@@ -14,6 +14,7 @@
 #include "../model.h"
 #include "../controller.h"
 #include "../hal.h"
+#include "view_player.h"
 #include "lv_page.h"
 #include "lv_bottom_sheet.h"
 #include "lv_toast.h"
@@ -100,9 +101,11 @@ static void on_track_clicked(lv_event_t *e) {
 
     /* Downloaded episode → play directly. */
     if (podcast_controller_episode_playable(&g_podcast_app, track_id)) {
-        int *id_ptr = malloc(sizeof(int));
-        *id_ptr = track_id;
-        PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, id_ptr);
+        player_open_arg_t *arg = malloc(sizeof(player_open_arg_t));
+        if (!arg) return;
+        memset(arg, 0, sizeof(*arg));
+        arg->episode_id = track_id;
+        PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, arg);
         return;
     }
 
@@ -394,10 +397,12 @@ static void on_play_selected_clicked(lv_event_t *e) {
         ids[wi++] = (int)(uintptr_t)lv_obj_get_user_data(row);
     }
     podcast_model_set_queue(&g_podcast_app, ids, n);
-    int *first_id = malloc(sizeof(int));
-    *first_id = ids[0];
+    player_open_arg_t *arg = malloc(sizeof(player_open_arg_t));
+    if (!arg) { free(ids); return; }
+    memset(arg, 0, sizeof(*arg));
+    arg->episode_id = ids[0];
     free(ids);
-    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, first_id);
+    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_CHANNEL, PAGE_PLAYER, arg);
 }
 
 /* ── Local episode delete (gray "Delete" button replaces "Download") ── */

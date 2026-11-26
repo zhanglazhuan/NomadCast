@@ -21,6 +21,7 @@
 #include "backend.h"
 #include "cache.h"
 #include "local_cache.h"
+#include "mp4_remux.h"
 #include "hal.h"
 #include "flash_store.h"
 #include "lang.h"
@@ -36,6 +37,9 @@
 #include "cJSON.h"
 
 static const char *TAG = "podcast_ctrl";
+
+/* Forward decls (defined below their first use in the download worker). */
+static void dl_scratch_path(const char *aac_path, char *out, int out_sz);
 
 /* ══════════════════════════════════════════════════════════════════════════
  * Controller private context — allocated on init, freed on deinit.
@@ -938,20 +942,32 @@ static void dl_worker_task(void *arg)
              * times before marking FAILED — but stop immediately if the user
              * cancelled (ctx->dl.abort_current) or audio started (ctx->dl.yield_to_audio). */
             bool ok = false;
+            /* Raw CDN bytes land in a scratch .m4a; the final seekable .aac is
+             * produced by remuxing (or a raw copy for non-MP4 like MP3). */
+            bool finalize = false;   /* a scratch .m4a must become the .aac */
+            char s_scratch[512];
+            dl_scratch_path(s_path, s_scratch, sizeof(s_scratch));
+
             /* A PENDING task can already have its full file on disk: a power
              * cut between the final byte and the COMPLETED status write leaves
              * the persisted state DOWNLOADING, which dl_resume_pending resets to
              * PENDING on boot. Resuming such a file asks for bytes=<size>-
-             * (past EOF) → CDN 416 → proxy 502. Detect a complete M4A up front
-             * and skip the transfer instead of re-downloading the whole file. */
+             * (past EOF) → CDN 416 → proxy 502. Detect the finished .aac — or a
+             * complete .m4a scratch whose remux never ran — up front and skip
+             * the transfer instead of re-downloading the whole file. */
             if (cache_local_file_complete(s_path)) {
                 ESP_LOGI(TAG, "dl: task %d already complete on disk — marking done",
                          task_id);
+                ok = true;                 /* final .aac is ready, nothing to do */
+            } else if (cache_local_file_complete(s_scratch)) {
+                ESP_LOGI(TAG, "dl: task %d has a complete scratch — remuxing", task_id);
+                finalize = true;           /* remux below, then mark done */
                 ok = true;
             }
             g_dl_cb_ctx = &ctx->dl;
             for (int attempt = 1; attempt <= DL_MAX_ATTEMPTS && !ok; attempt++) {
-                ok = http_download_to_file(s_url, s_path, dl_progress_cb);
+                ok = http_download_to_file(s_url, s_scratch, dl_progress_cb);
+                if (ok) finalize = true;
                 if (ok || ctx->dl.abort_current || ctx->dl.yield_to_audio) break;
                 if (attempt < DL_MAX_ATTEMPTS) {
                     ESP_LOGW(TAG, "dl: task %d attempt %d/%d failed — retrying",
@@ -976,9 +992,22 @@ static void dl_worker_task(void *arg)
                  * finished just before the cancel landed, this also clears the
                  * now-orphaned file. */
                 remove(s_path);
+                remove(s_scratch);
                 ESP_LOGI(TAG, "dl: task %d cancelled — file removed", task_id);
                 continue;
             }
+
+            /* Turn a complete scratch .m4a into the final seekable .aac: remux
+             * MP4→ADTS, falling back to a raw copy when it isn't MP4 (e.g. an
+             * MP3, already seekable and sniffed by the decoder). */
+            if (ok && finalize) {
+                int d = 0;
+                ok = mp4_remux_to_adts(s_scratch, s_path, &d) ||
+                     mp4_copy_file(s_scratch, s_path);
+                if (ok) remove(s_scratch);
+                else ESP_LOGE(TAG, "dl: task %d remux/copy failed", task_id);
+            }
+
             if (ok) {
                 dl_set_status(app, task_id, DOWNLOAD_STATUS_COMPLETED, 100);
                 task_store_update(app, task_id);
@@ -1309,10 +1338,23 @@ static void podcast_local_audio_path(const char *ch_title, const char *ep_title,
 {
     char ch_safe[256], ep_safe[512];
     snprintf(ch_safe, sizeof(ch_safe), "%s", ch_title ? ch_title : "unknown");
-    snprintf(ep_safe, sizeof(ep_safe), "%s.m4a", ep_title ? ep_title : "audio");
+    snprintf(ep_safe, sizeof(ep_safe), "%s.aac", ep_title ? ep_title : "audio");
     for (char *p = ch_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
     for (char *p = ep_safe; *p; p++) if (strchr("\\/:*?\"<>|", *p)) *p = '_';
     snprintf(out, out_sz, DL_BASE_PATH "/%s/%s", ch_safe, ep_safe);
+}
+
+/* The final on-SD file is a seekable .aac (ADTS). The raw CDN bytes are M4A
+ * (or occasionally MP3) and land in a scratch .m4a first, then are remuxed
+ * into the .aac path. Derive the scratch path by swapping the extension. */
+static void dl_scratch_path(const char *aac_path, char *out, int out_sz)
+{
+    size_t len = strlen(aac_path);
+    if (len >= 4 && strcasecmp(aac_path + len - 4, ".aac") == 0) {
+        snprintf(out, out_sz, "%.*s.m4a", (int)(len - 4), aac_path);
+    } else {
+        snprintf(out, out_sz, "%s.m4a", aac_path);   /* defensive fallback */
+    }
 }
 
 void podcast_controller_media_for_episode(struct PodcastApp *app, int eid,
@@ -1373,7 +1415,10 @@ void podcast_controller_toggle_play_pause(struct PodcastApp *app)
 {
     if (!app) return;
     int eid = podcast_model_get_current_episode_id(app);
-    if (eid <= 0) return;                    /* nothing loaded */
+    /* "Nothing loaded" only when there is neither an episode nor an active
+     * pipeline — the Recently Played flow plays a raw file with no episode id,
+     * so the pipeline itself is the source of truth there. */
+    if (eid <= 0 && !audio_player_is_active()) return;
 
     if (podcast_model_is_playing(app)) {
         hal_audio_pause(true);

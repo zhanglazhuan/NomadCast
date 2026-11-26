@@ -175,6 +175,11 @@ static void on_settings_clicked(lv_event_t* e) {
     PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_PROFILE, PAGE_SETTINGS, NULL);
 }
 
+static void on_recently_played_clicked(lv_event_t* e) {
+    (void)e;
+    PAGE_NAVIGATE_TO((&g_podcast_app), PAGE_PROFILE, PAGE_RECENTLY_PLAYED, NULL);
+}
+
 /* ---- 页面构建 ---- */
 static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     (void)user_data;
@@ -195,59 +200,6 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     lv_obj_set_style_pad_all(main, 4, 0);
     lv_obj_set_style_pad_top(main, 0, 0);
     lv_obj_set_style_pad_row(main, 6, 0);
-
-    /* ---- 用户信息卡片 ---- */
-    lv_obj_t* card = lv_obj_create(main);
-    lv_obj_set_size(card, LV_PCT(100), 72);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_border_width(card, 0, 0);
-    lv_obj_set_style_radius(card, 8, 0);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW);
-
-    lv_obj_t* info = lv_obj_create(card);
-    lv_obj_set_size(info, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_flex_grow(info, 1);
-    lv_obj_set_flex_flow(info, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_border_width(info, 0, 0);
-    lv_obj_set_style_pad_all(info, 0, 0);
-
-    /* 用户信息 — 从 model 读取 */
-    bool logged_in = podcast_model_is_logged_in(app);
-    const char* username = podcast_model_get_username(app);
-    const char* user_id  = podcast_model_get_user_id(app);
-
-    lv_obj_t* name = lv_label_create(info);
-    lv_label_set_text(name, logged_in ? username : tr(STR_NOT_LOGGED_IN));
-    lv_obj_set_style_text_font(name, g_cjk_font, 0);
-
-    lv_obj_t* uid = lv_label_create(info);
-    lv_label_set_text(uid, logged_in ? user_id : tr(STR_TAP_TO_LOGIN));
-    lv_obj_set_style_text_color(uid, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(uid, g_cjk_font, 0);
-
-#if PROFILE_LOGIN_BTN
-    /* 右侧图标按钮 — 按登录状态切换 login / logout */
-    lv_obj_t* icon_btn = lv_button_create(card);
-    lv_obj_set_size(icon_btn, 36, 36);
-    lv_obj_set_style_bg_opa(icon_btn, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(icon_btn, 0, 0);
-    lv_obj_set_style_shadow_width(icon_btn, 0, 0);
-
-    lv_obj_t* icon_img = lv_image_create(icon_btn);
-    lv_obj_center(icon_img);
-    lv_obj_set_style_img_recolor_opa(icon_img, LV_OPA_COVER, 0);
-
-    if (!logged_in) {
-        lv_image_set_src(icon_img, &ic_login);
-        lv_obj_set_style_img_recolor(icon_img, lv_color_hex(0x999999), 0);
-        lv_obj_add_event_cb(icon_btn, on_login_clicked, LV_EVENT_CLICKED, ctx);
-    } else {
-        lv_image_set_src(icon_img, &ic_logout);
-        lv_obj_set_style_img_recolor(icon_img, lv_color_hex(0x999999), 0);
-        lv_obj_add_event_cb(icon_btn, on_logout_clicked, LV_EVENT_CLICKED, ctx);
-    }
-#endif /* PROFILE_LOGIN_BTN */
 
     /* ---- 统计数据 ---- */
     lv_obj_t* stats = lv_obj_create(main);
@@ -314,6 +266,19 @@ static lv_obj_t* build_profile_page(struct PodcastApp* app, void* user_data) {
     g_profile_dl_timer = lv_timer_create(dl_count_refresh_cb, 2000, (void *)dt_t);
     /* Clean up timer when page is destroyed */
     lv_obj_add_event_cb(page.screen, on_profile_page_delete, LV_EVENT_DELETE, ctx);
+
+    lv_obj_t* recent_btn = lv_button_create(main);
+    lv_obj_set_size(recent_btn, LV_PCT(100), 42);
+    lv_obj_set_style_bg_color(recent_btn, lv_color_hex(0x4CAF50), 0);
+    lv_obj_set_style_border_width(recent_btn, 0, 0);
+    lv_obj_set_style_radius(recent_btn, 8, 0);
+    lv_obj_add_event_cb(recent_btn, on_recently_played_clicked, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t* rt = lv_label_create(recent_btn);
+    lv_label_set_text(rt, tr(STR_RECENTLY_PLAYED));
+    lv_obj_set_style_text_color(rt, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(rt, g_cjk_font, 0);
+    lv_obj_center(rt);
 
     lv_obj_t* settings_btn = lv_button_create(main);
     lv_obj_set_size(settings_btn, LV_PCT(100), 42);

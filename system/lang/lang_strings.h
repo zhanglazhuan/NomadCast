@@ -143,6 +143,8 @@ enum {
     STR_TAP_TO_LOGIN,
     STR_PLAY_HOURS,
     STR_DOWNLOADS,
+    STR_RECENTLY_PLAYED,
+    STR_NO_RECENT_PLAYS,
 
     /* Podcast — search */
     STR_SEARCH,
