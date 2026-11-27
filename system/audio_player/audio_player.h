@@ -54,6 +54,15 @@ void audio_player_stop(void);
 /** Pause / resume current playback. */
 void audio_player_pause(bool pause);
 
+/** Seek the currently-playing source to an absolute position (seconds).
+ *  Local files resolve the target to a compressed byte offset (side-car index
+ *  for remuxed ADTS, else a linear estimate) and rebuild-seek; network streams
+ *  seek by server-side time via a `start=` query param.  No-op (false) for
+ *  local MP4/M4A (no byte-seek) or unknown duration.
+ *  `duration_hint` (seconds, 0 = unknown) is used for the linear estimate when
+ *  the decoder has not yet reported a duration (ADTS carries none in-band). */
+bool audio_player_seek_to_sec(int target_sec, int duration_hint);
+
 /** Set volume 0-100. */
 void audio_player_set_volume(int vol);
 

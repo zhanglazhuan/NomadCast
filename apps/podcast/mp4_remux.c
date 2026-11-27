@@ -31,6 +31,19 @@ static const char *TAG = "mp4_remux";
 #define MAX_SAMPLE_BYTES (64u * 1024u)   /* a single AAC frame is < 8KB */
 #define MAX_STSC         64               /* stsc entries (podcasts have ~2-5) */
 
+/* Sparse seek index: one entry per second.  4h at 1 entry/s = 14400 entries
+ * × 8 bytes = ~115 KB (PSRAM).  Beyond this we stop recording and the player's
+ * linear-estimate fallback covers the tail. */
+#define MAX_INDEX_ENTRIES (4u * 3600u)
+
+/* Side-car seek-index magic ("NCID" little-endian).  MUST match the reader in
+ * system/audio_player/audio_player.c. */
+#define SEEK_INDEX_MAGIC   0x4443494Eu
+#define SEEK_INDEX_VERSION 1u
+
+/* One index entry: absolute playback second → ADTS byte offset (frame-aligned). */
+typedef struct { uint32_t sec; uint32_t byte; } seek_idx_ent_t;
+
 /* ADTS sampling_frequency_index table. */
 static const int k_sf_rates[13] = {
     96000, 88200, 64000, 48000, 44100, 32000, 24000,
@@ -349,6 +362,37 @@ bool mp4_remux_to_adts(const char *src, const char *dst, int *out_duration_sec) 
     }
     int rate = k_sf_rates[sfi];
 
+    /* ── stts + mdhd: authoritative per-frame sample count and timescale ──
+     * The ASC audioObjectType only flags HE-AAC when SBR is signaled explicitly;
+     * an implicitly-signaled SBR stream still declares AOT=2 (LC) in esds, which
+     * would make every frame look like 1024 samples instead of 2048 and halve
+     * the duration + seek-index time axis.  stts records the true samples-per-
+     * frame straight from the muxer, so read it (defaulting to 1024 = AAC-LC). */
+    uint32_t samples_per_frame = 1024;
+    uint32_t timescale = (uint32_t)rate;
+    {
+        long stts, stts_end;
+        if (box_find(f, stbl, stbl_end, "stts", &stts, &stts_end)) {
+            uint32_t sc = 0;
+            if (rd32(f, stts + 4, &sc) && sc >= 1) {
+                uint32_t delta = 0;
+                if (rd32(f, stts + 12, &delta) && delta >= 1 && delta <= 4096)
+                    samples_per_frame = delta;
+            }
+        }
+    }
+    {
+        long mdhd, mdhd_end;
+        if (box_find(f, mdia, mdia_end, "mdhd", &mdhd, &mdhd_end)) {
+            unsigned char ver = 0;
+            if (fseek(f, mdhd, SEEK_SET) == 0 && fread(&ver, 1, 1, f) == 1) {
+                long ts_off = (ver == 1) ? mdhd + 20 : mdhd + 12;
+                uint32_t ts = 0;
+                if (rd32(f, ts_off, &ts) && ts > 0) timescale = ts;
+            }
+        }
+    }
+
     /* ── stsz: sample sizes (or a fixed size) ── */
     uint32_t sample_size = 0, sample_count = 0;
     if (!rd32(f, stsz + 4, &sample_size) || !rd32(f, stsz + 8, &sample_count)) {
@@ -406,6 +450,16 @@ bool mp4_remux_to_adts(const char *src, const char *dst, int *out_duration_sec) 
     FILE *out = fopen(dst, "wb");
     if (!out) { free(samp); free(chunks); free(sizes); fclose(f); return false; }
 
+    /* Real duration + a sparse (time→byte) seek index, both built while the
+     * samples stream out — no extra seeks or reads. */
+    uint32_t duration_sec = (uint32_t)((int64_t)sample_count * samples_per_frame / timescale);
+    uint32_t idx_cap = duration_sec + 2;
+    if (idx_cap > MAX_INDEX_ENTRIES) idx_cap = MAX_INDEX_ENTRIES;
+    seek_idx_ent_t *idx = (seek_idx_ent_t *)malloc((size_t)idx_cap * sizeof(seek_idx_ent_t));
+    uint32_t idx_count = 0;
+    int32_t  last_sec  = -1;
+    uint64_t out_pos   = 0;   /* cumulative ADTS byte offset of the next frame */
+
     uint32_t si = 0;
     bool ok = true;
     for (uint32_t ci = 0; ci < chunk_count && ok; ci++) {
@@ -421,10 +475,25 @@ bool mp4_remux_to_adts(const char *src, const char *dst, int *out_duration_sec) 
             uint32_t sz = (sample_size != 0) ? sample_size : sizes[si];
             if (sz == 0 || sz > MAX_SAMPLE_BYTES || sz + 7 > 8191) { ok = false; break; }
             if (fread(samp, 1, sz, f) != sz) { ok = false; break; }
+
+            /* Record a 1s-granularity index entry at each whole-second boundary.
+             * out_pos is the frame-aligned start of THIS frame, so an entry's
+             * byte offset needs no further ADTS re-alignment at seek time. */
+            if (idx && idx_count < idx_cap) {
+                int32_t sec = (int32_t)((int64_t)si * samples_per_frame / timescale);
+                if (sec != last_sec) {
+                    idx[idx_count].sec  = (uint32_t)sec;
+                    idx[idx_count].byte = (uint32_t)out_pos;
+                    idx_count++;
+                    last_sec = sec;
+                }
+            }
+
             unsigned char h[7];
             adts_header(h, profile, sfi, cc, sz + 7);
             if (fwrite(h, 1, 7, out) != 7 ||
                 fwrite(samp, 1, sz, out) != sz) { ok = false; break; }
+            out_pos += 7 + sz;
             si++;
         }
     }
@@ -436,12 +505,42 @@ bool mp4_remux_to_adts(const char *src, const char *dst, int *out_duration_sec) 
     fclose(out);
 
     if (!ok) {
+        free(idx);
         ESP_LOGE(TAG, "remux failed (%" PRIu32 "/%" PRIu32 " samples)", si, sample_count);
         remove(dst);
         return false;
     }
+
+    /* Persist the seek index as a side-car <dst>.idx.  Failure here is non-fatal:
+     * the .aac is still playable, the player falls back to a linear estimate. */
+    if (idx && idx_count > 0) {
+        char idx_path[512 + 8];
+        snprintf(idx_path, sizeof(idx_path), "%s.idx", dst);
+        FILE *ifp = fopen(idx_path, "wb");
+        if (ifp) {
+            uint32_t magic = SEEK_INDEX_MAGIC;
+            uint32_t ver   = SEEK_INDEX_VERSION;
+            uint32_t fms   = (uint32_t)((int64_t)samples_per_frame * 1000 / timescale);
+            uint32_t cnt   = idx_count;
+            bool wok = (fwrite(&magic, 4, 1, ifp) == 1 &&
+                        fwrite(&ver, 4, 1, ifp) == 1 &&
+                        fwrite(&fms, 4, 1, ifp) == 1 &&
+                        fwrite(&cnt, 4, 1, ifp) == 1);
+            for (uint32_t i = 0; wok && i < idx_count; i++) {
+                wok = (fwrite(&idx[i].sec, 4, 1, ifp) == 1 &&
+                       fwrite(&idx[i].byte, 4, 1, ifp) == 1);
+            }
+            if (fflush(ifp) != 0) wok = false;
+            fclose(ifp);
+            if (!wok) remove(idx_path);
+            ESP_LOGI(TAG, "seek index: %" PRIu32 " entries → %s (%s)",
+                     idx_count, idx_path, wok ? "ok" : "failed");
+        }
+    }
+    free(idx);
+
     if (out_duration_sec)
-        *out_duration_sec = (int)((int64_t)sample_count * 1024 / rate);
+        *out_duration_sec = (int)duration_sec;
     ESP_LOGI(TAG, "remux ok: %" PRIu32 " samples, %d Hz, %d ch → %s",
              sample_count, rate, cc, dst);
     return true;

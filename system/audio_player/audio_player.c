@@ -12,6 +12,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -744,6 +745,146 @@ static void persist_position_if_local(void) {
 
     play_history_upsert(s_player.uri, s_player.resume_byte, s_player.resume_sec);
     play_history_save();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Drag-to-seek — time → byte resolution + rebuild-seek
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/* Side-car seek-index format, written by apps/podcast/mp4_remux.c next to a
+ * remuxed .aac.  Binary, little-endian:
+ *   u32 magic   = SEEK_INDEX_MAGIC
+ *   u32 version = 1
+ *   u32 frame_ms
+ *   u32 entry_count
+ *   entry_count × { u32 sec; u32 byte; }   (byte = frame-aligned ADTS offset) */
+#define SEEK_INDEX_MAGIC   0x4443494Eu   /* "NCID" — MUST match mp4_remux.c */
+#define SEEK_INDEX_VERSION 1u
+typedef struct { uint32_t sec; uint32_t byte; } seek_idx_ent_t;
+
+/* Load the side-car index for `path` and resolve target_sec to a frame-aligned
+ * byte offset (greatest entry with sec <= target_sec).  False when absent. */
+static bool seek_index_resolve(const char *path, int target_sec, int64_t *out_byte) {
+    char idx_path[2608];
+    snprintf(idx_path, sizeof(idx_path), "%s.idx", path);
+    FILE *f = fopen(idx_path, "rb");
+    if (!f) return false;
+
+    uint32_t magic = 0, ver = 0, fms = 0, cnt = 0;
+    bool ok = (fread(&magic, 4, 1, f) == 1 && magic == SEEK_INDEX_MAGIC &&
+               fread(&ver, 4, 1, f) == 1 && ver == SEEK_INDEX_VERSION &&
+               fread(&fms, 4, 1, f) == 1 &&
+               fread(&cnt, 4, 1, f) == 1);
+    (void)fms;
+    if (!ok || cnt == 0 || cnt > (4u * 3600u)) { fclose(f); return false; }
+
+    seek_idx_ent_t *idx = (seek_idx_ent_t *)malloc((size_t)cnt * sizeof(seek_idx_ent_t));
+    if (!idx) { fclose(f); return false; }
+    if (fread(idx, sizeof(seek_idx_ent_t), cnt, f) != cnt) { free(idx); fclose(f); return false; }
+    fclose(f);
+
+    int64_t byte = -1;
+    uint32_t lo = 0, hi = cnt;          /* greatest sec <= target_sec */
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (idx[mid].sec <= (uint32_t)target_sec) { byte = idx[mid].byte; lo = mid + 1; }
+        else hi = mid;
+    }
+    free(idx);
+    if (byte < 0) return false;
+    *out_byte = byte;
+    return true;
+}
+
+/* Fallback when no index: assume CBR and scale by file size / duration.
+ * target_sec == 0 resolves to byte 0 (play from the start). */
+static bool seek_linear_estimate(const char *path, int target_sec, int duration_sec,
+                                 int64_t *out_byte) {
+    if (duration_sec <= 0 || target_sec < 0) return false;
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+    long sz = ftell(f);
+    fclose(f);
+    if (sz <= 0) return false;
+    *out_byte = (int64_t)sz * target_sec / duration_sec;
+    return true;
+}
+
+bool audio_player_seek_to_sec(int target_sec, int duration_hint) {
+    if (!s_player.pipeline || target_sec < 0) return false;
+    if (!s_player.uri[0]) return false;
+
+    const bool local = audio_player_is_local_source();
+
+    /* Prefer the decoder's measured duration, but fall back to the caller's hint
+     * (the player page already knows the real length from the local-library
+     * cache / feed).  ADTS streams carry no duration in-band, so the decoder
+     * may report 0 — without the hint a linear (no-index) seek would fail. */
+    int dur = s_player.duration_sec > 0 ? s_player.duration_sec : duration_hint;
+
+    /* Clamp to just short of the end so a drag to the last second doesn't land
+     * at EOF (the reader seek would then fail and reset to 0). */
+    if (dur > 1 && target_sec >= dur)
+        target_sec = dur - 1;
+
+    if (local) {
+        /* Local file: resolve the target second to a compressed byte offset. */
+        local_codec_t codec = sniff_local_codec(s_player.uri);
+        if (codec == LOCAL_CODEC_MP4 ||
+            path_has_ext(s_player.uri, ".m4a") ||
+            path_has_ext(s_player.uri, ".mp4") ||
+            path_has_ext(s_player.uri, ".m4b")) {
+            ESP_LOGW(TAG, "seek: %s is MP4 — byte seek unsupported", s_player.uri);
+            return false;
+        }
+
+        int64_t byte = -1;
+        if (codec == LOCAL_CODEC_ADTS && seek_index_resolve(s_player.uri, target_sec, &byte)) {
+            ESP_LOGI(TAG, "seek: index %ds → byte %lld", target_sec, (long long)byte);
+        } else if (seek_linear_estimate(s_player.uri, target_sec, dur, &byte)) {
+            ESP_LOGI(TAG, "seek: linear %ds → byte %lld", target_sec, (long long)byte);
+        } else {
+            ESP_LOGW(TAG, "seek: cannot resolve %ds (no index, dur=%d)", target_sec, dur);
+            return false;
+        }
+        s_player.resume_byte = byte;
+        s_player.resume_sec  = target_sec;
+    } else {
+        /* Network stream: seek by server-side time — rebuild the URI with a
+         * `start=N` query param (the proxy/transcoder starts from that second). */
+        s_player.resume_byte = 0;
+        s_player.resume_sec  = target_sec;
+        ESP_LOGI(TAG, "seek: stream %ds (start param)", target_sec);
+    }
+
+    /* The codec has no in-place flush/seek, so this is a full teardown + fresh
+     * decode-state build — the ~100-300ms seek cost (same as resume-rebuild). */
+    if (s_player.pipeline) pipeline_teardown();
+
+    /* For a network seek, re-apply the `start=` param before rebuilding. */
+    if (!local) {
+        char resume_uri[sizeof(s_player.esp_uri)];
+        build_resume_uri(resume_uri, sizeof(resume_uri));
+        to_esp_uri(resume_uri, s_player.esp_uri, sizeof(s_player.esp_uri));
+    }
+
+    if (!pipeline_build()) return false;
+    audio_pipeline_run(s_player.pipeline);
+    if (local) apply_local_byte_seek();
+    s_player.base_sec      = s_player.resume_sec;
+    s_player.last_time_sec = s_player.resume_sec;
+    s_player.released      = false;
+    s_player.playing       = true;
+
+    if (local) {
+        play_history_upsert(s_player.uri, s_player.resume_byte, s_player.resume_sec);
+        play_history_save();
+    }
+
+    log_memory("seek");
+    ESP_LOGI(TAG, "seeked to %ds (byte %lld)", target_sec, (long long)s_player.resume_byte);
+    return true;
 }
 
 /* ── Public API ──────────────────────────────────────────────────────── */

@@ -40,6 +40,7 @@ static inline void hal_audio_stop(void)  { audio_player_stop(); }
 static inline void hal_audio_pause(bool pause) { audio_player_pause(pause); }
 static inline int  hal_audio_get_position_sec(void) { return audio_player_get_position_sec(); }
 static inline int  hal_audio_get_duration_sec(void) { return audio_player_get_duration_sec(); }
+static inline bool hal_audio_seek_to_sec(int sec, int duration_hint) { return audio_player_seek_to_sec(sec, duration_hint); }
 #else
 /* PC: implemented in pc_demo/hal.c */
 bool hal_audio_play_file(const char *path);

@@ -34,6 +34,7 @@ typedef struct {
     int         episode_id;
     int         channel_id;
     int         last_saved;     /* debounce: last saved position */
+    bool        dragging;       /* user is dragging the seek slider */
     lv_timer_t *pos_timer;
 } PlayerCtx;
 
@@ -60,7 +61,7 @@ static void player_pos_timer_cb(lv_timer_t *timer) {
     if (real_dur > 0 && real_dur != ctx->duration) {
         ctx->duration = real_dur;
         if (lv_obj_is_valid(ctx->pbar))
-            lv_bar_set_range(ctx->pbar, 0, real_dur > 0 ? real_dur : 1);
+            lv_slider_set_range(ctx->pbar, 0, real_dur > 0 ? real_dur : 1);
         if (lv_obj_is_valid(ctx->total_label)) {
             char db[16]; fmt_time(real_dur, db, sizeof(db));
             lv_label_set_text(ctx->total_label, db);
@@ -77,13 +78,18 @@ static void player_pos_timer_cb(lv_timer_t *timer) {
 
     if (pos > ctx->duration && ctx->duration > 0) pos = ctx->duration;
 
-    if (lv_obj_is_valid(ctx->pbar))
-        lv_bar_set_value(ctx->pbar, pos, LV_ANIM_OFF);
+    if (lv_obj_is_valid(ctx->pbar) && !ctx->dragging)
+        lv_slider_set_value(ctx->pbar, pos, LV_ANIM_OFF);
 
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d:%02d", pos / 60, pos % 60);
-    if (lv_obj_is_valid(ctx->time_label))
-        lv_label_set_text(ctx->time_label, buf);
+    /* While the user drags the knob, the left time label is driven by the
+     * slider's VALUE_CHANGED handler (showing the drag target), not by the
+     * live position — otherwise it keeps ticking during the drag. */
+    if (!ctx->dragging) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d:%02d", pos / 60, pos % 60);
+        if (lv_obj_is_valid(ctx->time_label))
+            lv_label_set_text(ctx->time_label, buf);
+    }
 
     /* Periodic save: every 5 seconds (episode flow only — raw-path resume
      * position is tracked separately by the audio_player play_history). */
@@ -107,6 +113,38 @@ static void player_ctx_cleanup(lv_event_t *e) {
     }
     if (ctx->pos_timer) { lv_timer_del(ctx->pos_timer); ctx->pos_timer = NULL; }
     free(ctx);
+}
+
+/* ── Seek slider (drag → release) ───────────────────────────────────────── */
+/* While dragging, only the label follows the knob; the audio keeps playing.  On
+ * release the target second is handed to audio_player_seek_to_sec, which no-ops
+ * for network streams / MP4 and rebuilds+seeks for local ADTS/MP3. */
+
+static void on_pbar_pressed(lv_event_t *e) {
+    PlayerCtx *ctx = (PlayerCtx *)lv_event_get_user_data(e);
+    if (ctx) ctx->dragging = true;
+}
+
+static void on_pbar_value_changed(lv_event_t *e) {
+    PlayerCtx *ctx = (PlayerCtx *)lv_event_get_user_data(e);
+    if (!ctx || !ctx->dragging) return;
+    lv_obj_t *sl = lv_event_get_current_target_obj(e);
+    int v = (int)lv_slider_get_value(sl);
+    char buf[16]; fmt_time(v, buf, sizeof(buf));
+    if (ctx->time_label && lv_obj_is_valid(ctx->time_label))
+        lv_label_set_text(ctx->time_label, buf);
+}
+
+static void on_pbar_released(lv_event_t *e) {
+    PlayerCtx *ctx = (PlayerCtx *)lv_event_get_user_data(e);
+    if (!ctx) return;
+    lv_obj_t *sl = lv_event_get_current_target_obj(e);
+    int target = (int)lv_slider_get_value(sl);
+    ctx->dragging = false;
+    /* ctx->duration is the real length (local-library cache / feed); pass it so
+     * the seek can fall back to a linear byte estimate even when the decoder
+     * has not reported a duration for ADTS (no in-band duration). */
+    hal_audio_seek_to_sec(target, ctx->duration);
 }
 
 /* ── Play/pause ────────────────────────────────────────────────────────── */
@@ -648,6 +686,7 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
     lv_label_set_text(ta, tartist);
     lv_obj_set_style_text_color(ta, lv_color_hex(0x888888), 0);
     lv_obj_set_style_text_font(ta, g_cjk_font, 0);
+    lv_obj_set_style_margin_top(ta, -8, 0);   /* 名称以下整体上移 8px（歌手/进度条/时间/按钮随之上移） */
 
     /* ── PlayerCtx: position polling ────────────────────────────────── */
     PlayerCtx *pctx = (PlayerCtx *)calloc(1, sizeof(PlayerCtx));
@@ -663,13 +702,19 @@ static lv_obj_t* build_player_page(struct PodcastApp* app, void* user_data) {
          * Actual audio seek would need audio_player support. */
     }
 
-    // 进度条
-    lv_obj_t* pbar = lv_bar_create(main);
-    lv_obj_set_size(pbar, LV_PCT(85), 4);
-    lv_obj_set_style_pad_top(pbar, 12, 0);
-    lv_bar_set_range(pbar, 0, duration > 0 ? duration : 1);
-    lv_bar_set_value(pbar, saved_pos, LV_ANIM_OFF);
+    // 进度条（可拖动 seek）—— 细胶囊轨道（前景/背景等高），圆形把手
+    lv_obj_t* pbar = lv_slider_create(main);
+    lv_obj_set_size(pbar, LV_PCT(85), 6);             /* 6px 细轨道：原 12px 的一半 */
+    lv_obj_set_style_pad_hor(pbar, 0, 0);             /* 轨道左右满宽 */
+    lv_obj_set_style_radius(pbar, 3, LV_PART_MAIN);       /* 背景（浅蓝）胶囊 */
+    lv_obj_set_style_radius(pbar, 3, LV_PART_INDICATOR);  /* 前景（深蓝）胶囊，与背景等高 */
+    lv_obj_set_style_pad_all(pbar, 4, LV_PART_KNOB);  /* 把手直径 6→14px（保持原大小） */
+    lv_slider_set_range(pbar, 0, duration > 0 ? duration : 1);
+    lv_slider_set_value(pbar, saved_pos, LV_ANIM_OFF);
     pctx->pbar = pbar;
+    lv_obj_add_event_cb(pbar, on_pbar_pressed,       LV_EVENT_PRESSED,       pctx);
+    lv_obj_add_event_cb(pbar, on_pbar_value_changed, LV_EVENT_VALUE_CHANGED, pctx);
+    lv_obj_add_event_cb(pbar, on_pbar_released,      LV_EVENT_RELEASED,      pctx);
 
     // 时间
     lv_obj_t* ptime = lv_obj_create(main);
