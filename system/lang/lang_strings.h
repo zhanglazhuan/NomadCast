@@ -121,6 +121,13 @@ enum {
     STR_CHANNEL_NOT_FOUND,
     STR_ALL,
 
+    /* Podcast — channel sort */
+    STR_SORT,
+    STR_SORT_ASC,
+    STR_SORT_DESC,
+    STR_SORT_NEWEST,
+    STR_SORT_OLDEST,
+
     /* Podcast — player */
     STR_TITLE,
     STR_TIME,
@@ -169,6 +176,7 @@ enum {
     STR_PENDING,
     STR_DONE,
     STR_FAILED,
+    STR_FINALIZING,
     STR_ETA,
     STR_STATUS,
     STR_NO_DOWNLOAD_TASKS,

@@ -13,6 +13,7 @@
 #include "../app.h"
 #include "../model.h"
 #include "../controller.h"
+#include "../local_cache.h"
 #include "../hal.h"
 #include "view_player.h"
 #include "lv_page.h"
@@ -26,6 +27,14 @@ extern const lv_image_dsc_t ic_info;
 /* Stable episode id = channel_id * this + global episode index.
  * Must exceed the max episodes per channel (100+ pages → 1000+ episodes). */
 #define EPISODE_ID_PER_CHANNEL 100000
+
+/* Local episode list sort modes. SORT_ASC = the network feed order (default). */
+typedef enum {
+    SORT_ASC = 0,    /* 默认正序 — same order as the network feed */
+    SORT_DESC,       /* 默认反序 — reverse of the network feed */
+    SORT_NEWEST,     /* 最新下载 — newest download first */
+    SORT_OLDEST,     /* 最早下载 — oldest download first */
+} local_sort_mode_t;
 
 typedef struct {
     lv_obj_t  *sel_label;
@@ -43,6 +52,8 @@ typedef struct {
     lv_obj_t  *prev_btn;
     lv_obj_t  *next_btn;
     bool       is_local;        /* true when listing a downloaded (Local) channel */
+    int        sort_mode;       /* local_sort_mode_t — local list ordering */
+    lv_bottom_sheet_t *sort_sheet;      /* Sort-options popup */
     lv_bottom_sheet_t *confirm_sheet;   /* Delete-confirmation popup */
 } ChannelPageCtx;
 
@@ -360,7 +371,7 @@ static void on_download_clicked(lv_event_t *e) {
         int eid = (int)(uintptr_t)lv_obj_get_user_data(row);
         const Episode *ep = podcast_model_get_episode_by_id(&g_podcast_app, eid);
         if (ep && ep->audio_url[0]) {
-            podcast_controller_download_episode_ex2(&g_podcast_app, ep->audio_url, ep->title, ch_name, cid, eid, ep->duration_sec, ch->collection_id);
+            podcast_controller_download_episode_ex2(&g_podcast_app, ep->audio_url, ep->title, ch_name, cid, eid, ep->duration_sec, ch->collection_id, ep->pub_date);
             submitted++;
         }
     }
@@ -573,6 +584,256 @@ static void on_info_clicked(lv_event_t *e) {
     }
 }
 
+/* Network feed index of an episode — the low digits of its episode id
+ * (id = channel_id * EPISODE_ID_PER_CHANNEL + feed_index). Sorting by the raw
+ * id was wrong because the channel_id prefix is the TRANSIENT chart position
+ * (c->id = i+1 on each chart fetch), not a stable identity: episodes of the
+ * same channel downloaded in different sessions got different prefixes, so id
+ * order no longer matched the network feed order. The feed index alone encodes
+ * the network order. NOTE: this is only a FALLBACK now — orphan-recovered
+ * episodes carry a filename hash id, so their `% 100000` value is meaningless;
+ * the primary sort key is the persisted published date (see below). */
+static int local_feed_index(const Episode *e) {
+    return e->id % EPISODE_ID_PER_CHANNEL;
+}
+
+/* Ordering comparator for the local episode list. Returns >0 when `a` should
+ * sort AFTER `b`.
+ *
+ * 默认正序 (SORT_ASC) must mirror the network feed, which lists episodes
+ * newest-first by their published date (iTunes releaseDate — ISO-8601 UTC, so
+ * a plain string compare sorts chronologically). 默认反序 (SORT_DESC) is its
+ * reverse. The published date is the correct key because it is stable across
+ * sessions (unlike the transient channel_id prefix) AND survives orphan
+ * recovery (unlike `id % 100000`, which is a hash for recovered files).
+ * Episodes without a published date (recovered orphans / pre-field downloads,
+ * before the backfill fills them in) fall back to the feed index. */
+static int local_sort_cmp_before(const Episode *a, const Episode *b, int mode) {
+    int r = 0;
+    switch (mode) {
+        case SORT_NEWEST:
+            if (a->downloaded_at != b->downloaded_at)
+                r = (a->downloaded_at < b->downloaded_at) ? 1 : -1;
+            break;
+        case SORT_OLDEST:
+            if (a->downloaded_at != b->downloaded_at)
+                r = (a->downloaded_at > b->downloaded_at) ? 1 : -1;
+            break;
+        case SORT_ASC:
+        case SORT_DESC:
+        default: {
+            bool ha = a->pub_date[0] != '\0';
+            bool hb = b->pub_date[0] != '\0';
+            if (ha && hb) {
+                int pc = strcmp(a->pub_date, b->pub_date);
+                if (pc != 0)
+                    r = (mode == SORT_DESC) ? ((pc < 0) ? -1 : 1)
+                                            : ((pc < 0) ? 1 : -1);
+            } else if (ha != hb) {
+                /* known published date before unknown (recovered orphan/legacy) */
+                r = (mode == SORT_DESC) ? (ha ? 1 : -1) : (ha ? -1 : 1);
+            }
+            if (r == 0) {
+                int fa = local_feed_index(a);
+                int fb = local_feed_index(b);
+                if (fa != fb)
+                    r = (mode == SORT_DESC) ? ((fa < fb) ? 1 : -1)
+                                            : ((fa > fb) ? 1 : -1);
+            }
+            break;
+        }
+    }
+    if (r == 0 && a->id != b->id) r = (a->id > b->id) ? 1 : -1;  /* deterministic tie-break */
+    return r;
+}
+
+/* Rebuild the local (downloaded) episode rows for this channel, ordered by the
+ * current sort mode. Clears the list container and re-fills it. */
+static void render_local_list(ChannelPageCtx *ctx) {
+    if (!ctx || !lv_obj_is_valid(ctx->list_container)) return;
+    PodcastApp *app = &g_podcast_app;
+    PodcastModel *m = app->model;
+    lv_obj_t *list = ctx->list_container;
+
+    free(ctx->track_checked); ctx->track_checked = NULL;
+    free(ctx->track_cbs);     ctx->track_cbs = NULL;
+    ctx->episode_count = 0;
+    lv_obj_clean(list);
+
+    int n = 0;
+    for (int i = 0; i < m->local_episode_count; i++)
+        if (m->local_episodes[i].channel_id == ctx->channel_id) n++;
+    if (n <= 0) return;
+
+    int *idx = (int *)malloc(n * sizeof(int));
+    if (!idx) return;
+    int wi = 0;
+    for (int i = 0; i < m->local_episode_count; i++)
+        if (m->local_episodes[i].channel_id == ctx->channel_id) idx[wi++] = i;
+
+    /* Insertion sort on indices — per-channel episode counts are small. */
+    for (int a = 1; a < n; a++) {
+        int key = idx[a];
+        int b = a - 1;
+        while (b >= 0 && local_sort_cmp_before(&m->local_episodes[idx[b]],
+                                               &m->local_episodes[key],
+                                               ctx->sort_mode) > 0) {
+            idx[b + 1] = idx[b];
+            b--;
+        }
+        idx[b + 1] = key;
+    }
+
+    ctx->track_checked = (bool *)calloc(n, sizeof(bool));
+    ctx->track_cbs     = (lv_obj_t **)calloc(n, sizeof(lv_obj_t *));
+    for (int i = 0; i < n; i++)
+        create_track_row(list, &m->local_episodes[idx[i]], i, i + 1, ctx);
+    ctx->episode_count = n;
+    free(idx);
+}
+
+/* ── Local pub_date backfill (recover network episode order) ──
+ * 默认正序/默认反序 sort by the persisted published date. Episodes downloaded
+ * before that field existed, or recovered as orphans (filename-hash id), have an
+ * empty pub_date and so fall back to `id % 100000` — which is wrong for orphans.
+ * When the local page opens, we fetch this channel's feed and title-match each
+ * empty-pub_date episode to recover its real published date, persist it, and
+ * re-render. Best-effort: page 0 only (the newest EPISODES_PER_PAGE), offline
+ * leaves the fallback order in place. */
+
+/* Normalize a title the same way the on-SD filename is derived (the downloader
+ * sanitizes \ / : * ? " < > | to '_'), so a recovered orphan whose title came
+ * from a filename still matches the raw feed title. */
+static void sanitize_filename_chars(const char *s, char *out, int sz) {
+    int i = 0;
+    for (; s && *s && i < sz - 1; s++)
+        out[i++] = strchr("\\/:*?\"<>|", *s) ? '_' : *s;
+    out[i] = '\0';
+}
+
+static bool title_matches(const char *a, const char *b) {
+    if (!a || !b || !a[0] || !b[0]) return false;
+    if (strcmp(a, b) == 0) return true;
+    char sa[512], sb[512];
+    sanitize_filename_chars(a, sa, sizeof(sa));
+    sanitize_filename_chars(b, sb, sizeof(sb));
+    return strcmp(sa, sb) == 0;
+}
+
+static void backfill_local_pub_dates(ChannelPageCtx *ctx, rss_feed_t *rss) {
+    if (!ctx || !rss || rss->episode_count <= 0) return;
+    PodcastApp *app = &g_podcast_app;
+    PodcastModel *m = app->model;
+
+    bool changed = false;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        Episode *e = &m->local_episodes[i];
+        if (e->channel_id != ctx->channel_id) continue;
+        if (e->pub_date[0]) continue;   /* already has a date */
+        for (int j = 0; j < rss->episode_count; j++) {
+            rss_episode_t *re = &rss->episodes[j];
+            if (re->pub_date[0] && title_matches(e->title, re->title)) {
+                cache_local_update_pub_date(app, e->id, re->pub_date);
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (changed) render_local_list(ctx);
+}
+
+static void local_backfill_poll_cb(lv_timer_t *timer) {
+    ChannelPageCtx *ctx = (ChannelPageCtx *)lv_timer_get_user_data(timer);
+    if (!ctx || !lv_obj_is_valid(ctx->list_container)) {
+        lv_timer_del(timer); ctx->poll_timer = NULL; return;
+    }
+
+    if (!g_rss_done()) return;
+    if (g_rss_channel_id() != ctx->channel_id) return;
+
+    lv_timer_del(timer); ctx->poll_timer = NULL;
+    if (g_rss_ok() && g_rss_result() && g_rss_result()->episode_count > 0)
+        backfill_local_pub_dates(ctx, g_rss_result());
+}
+
+/* Trigger a background feed fetch + backfill if any of this channel's episodes
+ * still lacks a published date. No-op when every episode already has one (the
+ * common case after the pub_date field was introduced). */
+static void local_backfill_if_needed(ChannelPageCtx *ctx) {
+    if (!ctx || !ctx->is_local) return;
+    PodcastModel *m = g_podcast_app.model;
+
+    bool missing = false;
+    for (int i = 0; i < m->local_episode_count; i++)
+        if (m->local_episodes[i].channel_id == ctx->channel_id &&
+            !m->local_episodes[i].pub_date[0]) { missing = true; break; }
+    if (!missing) return;
+
+    /* Reuse the same async RSS singleton as the network page; the poll callback
+     * only acts once g_rss_channel_id() matches this channel. */
+    podcast_controller_fetch_channel_episodes(&g_podcast_app, ctx->channel_id);
+    if (ctx->poll_timer) lv_timer_del(ctx->poll_timer);
+    ctx->poll_timer = lv_timer_create(local_backfill_poll_cb, 300, ctx);
+}
+
+/* Sort-options popup — replaces the channel-info "i" button on local channels. */
+static void on_sort_sheet_delete(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (ctx) ctx->sort_sheet = NULL;
+}
+
+static void on_sort_option_clicked(lv_event_t *e) {
+    lv_obj_t *row = lv_event_get_current_target_obj(e);
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    int mode = (int)(uintptr_t)lv_obj_get_user_data(row);
+    if (!ctx) return;
+    if (ctx->sort_sheet) { lv_bottom_sheet_close(ctx->sort_sheet); ctx->sort_sheet = NULL; }
+    ctx->sort_mode = mode;
+    render_local_list(ctx);
+}
+
+static void on_sort_clicked(lv_event_t *e) {
+    ChannelPageCtx *ctx = lv_event_get_user_data(e);
+    if (!ctx) return;
+
+    lv_obj_t *scr = lv_screen_active();
+    ctx->sort_sheet = lv_bottom_sheet_create(scr);
+    lv_obj_add_event_cb(ctx->sort_sheet->overlay, on_sort_sheet_delete, LV_EVENT_DELETE, ctx);
+    lv_bottom_sheet_add_header(ctx->sort_sheet, tr(STR_SORT));
+
+    lv_obj_t *content = lv_bottom_sheet_get_content(ctx->sort_sheet);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(content, 8, 0);
+    lv_obj_set_style_pad_row(content, 4, 0);
+
+    static const int modes[4] = { SORT_ASC, SORT_DESC, SORT_NEWEST, SORT_OLDEST };
+    static const int keys[4]  = { STR_SORT_ASC, STR_SORT_DESC, STR_SORT_NEWEST, STR_SORT_OLDEST };
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *row = lv_button_create(content);
+        lv_obj_set_size(row, LV_PCT(100), 44);
+        lv_obj_set_style_bg_color(row, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_shadow_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+
+        lv_obj_t *lbl = lv_label_create(row);
+        lv_label_set_text(lbl, tr(keys[i]));
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 12, 0);
+        lv_obj_set_style_text_font(lbl, g_cjk_font, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0x333333), 0);
+
+        if (ctx->sort_mode == modes[i]) {
+            lv_obj_t *ok = lv_label_create(row);
+            lv_label_set_text(ok, LV_SYMBOL_OK);
+            lv_obj_align(ok, LV_ALIGN_RIGHT_MID, -12, 0);
+            lv_obj_set_style_text_color(ok, lv_color_hex(0x1976D2), 0);
+        }
+
+        lv_obj_set_user_data(row, (void *)(uintptr_t)modes[i]);
+        lv_obj_add_event_cb(row, on_sort_option_clicked, LV_EVENT_CLICKED, ctx);
+    }
+}
+
 /* ── Bottom action bar (选中数 | spacer | Download | Play) ──
  * 浮动吸底图层：挂在 page.screen 上、FLOATING 浮动、吸底对齐，浮在列表之上。
  * (与 view_download_task.c 的 build_action_bar 结构保持一致。) */
@@ -683,20 +944,37 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
     ctx->is_local = (channel && channel->downloaded);
     lv_obj_add_event_cb(page.screen, channel_ctx_cleanup, LV_EVENT_DELETE, ctx);
 
-    /* Info button — shows channel details in bottom sheet */
+    /* Right header slot — the local (downloaded) channel gets a sort button in
+     * place of the channel-info "i" icon; network channels keep the info sheet. */
     if (page.header_right) {
-        lv_obj_t *info_btn = lv_button_create(page.header_right);
-        lv_obj_set_size(info_btn, 24, 24);
-        lv_obj_set_style_bg_opa(info_btn, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(info_btn, 0, 0);
-        lv_obj_set_style_shadow_width(info_btn, 0, 0);
-        lv_obj_set_style_pad_all(info_btn, 0, 0);
-        lv_obj_add_event_cb(info_btn, on_info_clicked, LV_EVENT_CLICKED, ctx);
-        lv_obj_t *info_img = lv_image_create(info_btn);
-        lv_image_set_src(info_img, &ic_info);
-        lv_obj_center(info_img);
-        lv_obj_set_style_img_recolor(info_img, lv_color_hex(0x666666), 0);
-        lv_obj_set_style_img_recolor_opa(info_img, LV_OPA_COVER, 0);
+        if (ctx->is_local) {
+            lv_obj_set_width(page.header_right, 48);
+            lv_obj_t *sort_btn = lv_button_create(page.header_right);
+            lv_obj_set_size(sort_btn, 48, 24);
+            lv_obj_set_style_bg_opa(sort_btn, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(sort_btn, 0, 0);
+            lv_obj_set_style_shadow_width(sort_btn, 0, 0);
+            lv_obj_set_style_pad_all(sort_btn, 0, 0);
+            lv_obj_add_event_cb(sort_btn, on_sort_clicked, LV_EVENT_CLICKED, ctx);
+            lv_obj_t *sort_label = lv_label_create(sort_btn);
+            lv_label_set_text(sort_label, tr(STR_SORT));
+            lv_obj_center(sort_label);
+            lv_obj_set_style_text_font(sort_label, g_cjk_font, 0);
+            lv_obj_set_style_text_color(sort_label, lv_color_hex(0x1976D2), 0);
+        } else {
+            lv_obj_t *info_btn = lv_button_create(page.header_right);
+            lv_obj_set_size(info_btn, 24, 24);
+            lv_obj_set_style_bg_opa(info_btn, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(info_btn, 0, 0);
+            lv_obj_set_style_shadow_width(info_btn, 0, 0);
+            lv_obj_set_style_pad_all(info_btn, 0, 0);
+            lv_obj_add_event_cb(info_btn, on_info_clicked, LV_EVENT_CLICKED, ctx);
+            lv_obj_t *info_img = lv_image_create(info_btn);
+            lv_image_set_src(info_img, &ic_info);
+            lv_obj_center(info_img);
+            lv_obj_set_style_img_recolor(info_img, lv_color_hex(0x666666), 0);
+            lv_obj_set_style_img_recolor_opa(info_img, LV_OPA_COVER, 0);
+        }
     }
 
     /* ── Episode list header ── */
@@ -768,21 +1046,9 @@ static lv_obj_t *build_channel_page(struct PodcastApp *app, void *user_data) {
 
     /* ── Build episode list ── */
     if (channel && channel->downloaded) {
-        int local_count = 0;
-        for (int i = 0; i < app->model->local_episode_count; i++)
-            if (app->model->local_episodes[i].channel_id == channel_id) local_count++;
-        ctx->episode_count = local_count;
-        if (local_count > 0) {
-            ctx->track_checked = (bool *)calloc(local_count, sizeof(bool));
-            ctx->track_cbs = (lv_obj_t **)calloc(local_count, sizeof(lv_obj_t *));
-            int row_idx = 0;
-            for (int i = 0; i < app->model->local_episode_count; i++) {
-                if (app->model->local_episodes[i].channel_id == channel_id) {
-                    create_track_row(list, &app->model->local_episodes[i], row_idx, row_idx + 1, ctx);
-                    row_idx++;
-                }
-            }
-        }
+        ctx->sort_mode = SORT_ASC;   /* default: same order as the network feed */
+        render_local_list(ctx);
+        local_backfill_if_needed(ctx);   /* recover pub_date for legacy/orphan episodes */
     } else {
         /* Network channel — async fetch page 0 (already triggered above), then
          * show loading and poll for the result. */

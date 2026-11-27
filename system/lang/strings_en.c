@@ -113,6 +113,13 @@ const char *const strings_en[STR_COUNT] = {
     "Channel not found",
     "ALL",
 
+    /* Podcast — channel sort */
+    "Sort",
+    "Default order",
+    "Reverse order",
+    "Newest download",
+    "Oldest download",
+
     /* Podcast — player */
     "Title",
     "Time",
@@ -161,6 +168,7 @@ const char *const strings_en[STR_COUNT] = {
     "Pending",
     "Done",
     "Failed",
+    "Processing",
     "ETA",
     "Status",
     "No download tasks",

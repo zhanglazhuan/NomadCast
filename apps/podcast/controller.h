@@ -190,10 +190,13 @@ bool podcast_controller_download_episode_ex(struct PodcastApp *app,
     const char *url, const char *title, const char *channel_title,
     int channel_id, int episode_id);
 
-/** Download with duration for accurate metadata */
+/** Download with duration + published date for accurate metadata. `pub_date`
+ *  is the network feed's published date (iTunes releaseDate) — persisted so the
+ *  local list can reproduce the network episode order. */
 bool podcast_controller_download_episode_ex2(struct PodcastApp *app,
     const char *url, const char *title, const char *channel_title,
-    int channel_id, int episode_id, int duration_sec, int collection_id);
+    int channel_id, int episode_id, int duration_sec, int collection_id,
+    const char *pub_date);
 
 /** Poll function: called periodically from LVGL timer to check async completion */
 void podcast_controller_poll(struct PodcastApp *app);

@@ -110,7 +110,10 @@ static void dl_refresh_progress_cb(lv_timer_t* t) {
         for (int i = 0; i < m->download_task_count; i++) {
             if (m->download_tasks[i].id == id &&
                 m->download_tasks[i].status == DOWNLOAD_STATUS_DOWNLOADING) {
-                lv_label_set_text_fmt(lbl, "%d%%", m->download_tasks[i].progress);
+                if (m->download_tasks[i].finalizing)
+                    lv_label_set_text(lbl, tr(STR_FINALIZING));
+                else
+                    lv_label_set_text_fmt(lbl, "%d%%", m->download_tasks[i].progress);
                 break;
             }
         }
@@ -493,8 +496,13 @@ static lv_obj_t* build_task_row(lv_obj_t* parent, const DownloadTask* task, int 
             status_color = 0x888888; status_text = tr(STR_PENDING); break;
         case DOWNLOAD_STATUS_DOWNLOADING:
             status_color = 0x1976D2;
-            snprintf(pct_buf, sizeof(pct_buf), "%d%%", task->progress);
-            status_text = pct_buf; break;
+            if (task->finalizing) {
+                status_text = tr(STR_FINALIZING);
+            } else {
+                snprintf(pct_buf, sizeof(pct_buf), "%d%%", task->progress);
+                status_text = pct_buf;
+            }
+            break;
         case DOWNLOAD_STATUS_COMPLETED:
             status_color = 0x4CAF50; status_text = tr(STR_DONE); break;
         case DOWNLOAD_STATUS_FAILED:
@@ -596,14 +604,24 @@ static lv_obj_t* build_task_list(lv_obj_t* parent, DownloadTaskPageCtx* ctx) {
     if (end > ctx->task_count) end = ctx->task_count;
     int visible = end - start;
 
-    /* Free old checkbox arrays */
+    /* Free old checkbox arrays. Sized by task_count (not visible): task_cbs /
+     * task_checked are indexed by the task's ARRAY index (the `index` passed to
+     * build_task_row → checkbox user_data → on_checkbox_changed / set_all_checked
+     * / on_delete_confirm), which spans the whole model array, not just the
+     * current page. */
     free(ctx->task_checked); free(ctx->task_cbs);
-    ctx->task_checked = (bool *)calloc(visible, sizeof(bool));
-    ctx->task_cbs = (lv_obj_t **)calloc(visible, sizeof(lv_obj_t *));
+    ctx->task_checked = (bool *)calloc(ctx->task_count, sizeof(bool));
+    ctx->task_cbs = (lv_obj_t **)calloc(ctx->task_count, sizeof(lv_obj_t *));
 
+    /* Newest task first: render the array in reverse so the most recently
+     * downloaded (highest id) appears at the top of the list. The checkbox
+     * `index` stays the task's real array index so selection/delete still map
+     * 1:1 to download_tasks[]. */
     ctx->row_visible = visible;
-    for (int i = 0; i < visible; i++)
-        build_task_row(parent, &tasks[start + i], start + i, i, ctx);
+    for (int i = 0; i < visible; i++) {
+        int src = ctx->task_count - 1 - (start + i);
+        build_task_row(parent, &tasks[src], src, i, ctx);
+    }
 
     /* Update page label */
     if (ctx->page_label)

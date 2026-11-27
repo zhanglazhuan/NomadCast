@@ -68,6 +68,15 @@ static int json_get_int(const char *json, const char *key, int def) {
     return atoi(p);
 }
 
+static long long json_get_ll(const char *json, const char *key, long long def) {
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = strstr(json, search);
+    if (!p) return def;
+    p += strlen(search);
+    return atoll(p);
+}
+
 static void json_write_str(FILE *f, const char *s) {
     fputc('"', f);
     for (; *s; s++) {
@@ -116,7 +125,8 @@ static const char *local_channel_title(struct PodcastApp *app, int chan_id) {
  * that channel's bucket). */
 static bool local_model_add(struct PodcastApp *app, int canon, int col,
                             const char *ch_title, int eid, const char *ep_title,
-                            const char *url, int dur) {
+                            const char *url, int dur, time_t dl_time,
+                            const char *pub_date) {
     PodcastModel *m = app->model;
 
     if (url && url[0])
@@ -159,8 +169,10 @@ static bool local_model_add(struct PodcastApp *app, int canon, int col,
     Episode *e = &m->local_episodes[m->local_episode_count];
     memset(e, 0, sizeof(Episode));
     e->id = eid; e->channel_id = canon; e->duration_sec = dur;
+    e->downloaded_at = dl_time;
     snprintf(e->title, sizeof(e->title), "%s", ep_title ? ep_title : "");
     snprintf(e->audio_url, sizeof(e->audio_url), "%s", url ? url : "");
+    snprintf(e->pub_date, sizeof(e->pub_date), "%s", pub_date ? pub_date : "");
     m->local_episode_count = en;
 
     for (int i = 0; i < m->local_channel_count; i++)
@@ -180,6 +192,21 @@ static bool local_model_add(struct PodcastApp *app, int canon, int col,
         m->local_channel_count = cn;
     }
     return true;
+}
+
+/* Next monotonic download sequence number. Wall-clock time(NULL) is unreliable
+ * before SNTP syncs (it returns 0), so using it as `downloaded_at` made every
+ * download share the same timestamp and collapsed 最新下载/最早下载 into the id
+ * tie-break. Each new download is instead assigned one past the largest existing
+ * value — a strict, durable ordering: the max is reloaded from the bucket JSON
+ * on boot, so it never goes backwards across reboots. */
+static time_t next_download_seq(struct PodcastApp *app) {
+    PodcastModel *m = app->model;
+    time_t max = 0;
+    for (int i = 0; i < m->local_episode_count; i++)
+        if (m->local_episodes[i].downloaded_at > max)
+            max = m->local_episodes[i].downloaded_at;
+    return max + 1;
 }
 
 /* Does any indexed episode resolve to `path` on SD?  Mirrors local_model_add's
@@ -232,7 +259,10 @@ static void local_write_channel(struct PodcastApp *app, int canon) {
         first = false;
         fprintf(f, "{\"eid\":%d,\"ep\":", e->id); json_write_str(f, e->title);
         fprintf(f, ",\"url\":"); json_write_str(f, e->audio_url);
-        fprintf(f, ",\"dur\":%d}", e->duration_sec);
+        fprintf(f, ",\"dur\":%d,\"dl\":%lld", e->duration_sec,
+                (long long)e->downloaded_at);
+        fprintf(f, ",\"pub\":"); json_write_str(f, e->pub_date);
+        fprintf(f, "}");
     }
     fprintf(f, "\n]}\n");
     fflush(f);
@@ -257,10 +287,12 @@ static void parse_channel_buf(struct PodcastApp *app, const char *buf) {
         ep = obj + 1;
         int eid = json_get_int(obj, "eid", 0);
         int dur = json_get_int(obj, "dur", 0);
-        static char eptitle[256], url[1024];   /* boot-time, single-threaded */
+        time_t dl = (time_t)json_get_ll(obj, "dl", 0);
+        static char eptitle[256], url[1024], pub[128];   /* boot-time, single-threaded */
         json_get_str(obj, "ep",  eptitle, sizeof(eptitle));
         json_get_str(obj, "url", url, sizeof(url));
-        local_model_add(app, canon, col, ch_title, eid, eptitle, url, dur);
+        json_get_str(obj, "pub", pub, sizeof(pub));
+        local_model_add(app, canon, col, ch_title, eid, eptitle, url, dur, dl, pub);
     }
 }
 
@@ -597,7 +629,8 @@ static void recover_orphaned_downloads(struct PodcastApp *app) {
             /* local_model_add dedups by (channel, title), so an episode already
              * indexed (normal download or a previous recovery) is skipped. */
             bool r_added = local_model_add(app, canon, col, ch_title,
-                                fnv1a_positive(aac_path), ep_title, aac_path, dur);
+                                fnv1a_positive(aac_path), ep_title, aac_path, dur,
+                                next_download_seq(app), NULL);
             printf("[DBG] recover: file='%s' dur=%d added=%d\n", aac_path, dur, r_added);
             fflush(stdout);
             if (r_added) added_any = true;
@@ -628,7 +661,7 @@ static void migrate_old(struct PodcastApp *app) {
         json_get_str(obj, "ch",  ch_title, sizeof(ch_title));
         json_get_str(obj, "ep",  eptitle,  sizeof(eptitle));
         json_get_str(obj, "url", url,      sizeof(url));
-        local_model_add(app, canon, col, ch_title, eid, eptitle, url, dur);
+        local_model_add(app, canon, col, ch_title, eid, eptitle, url, dur, 0, NULL);
     }
     free(buf);
 
@@ -768,38 +801,52 @@ void cache_local_add(struct PodcastApp *app,
                      int cid, const char *ch_title,
                      int eid, const char *ep_title,
                      const char *url, int dur,
-                     const char *path, int collection_id) {
-    (void)path;
+                     const char *path, int collection_id,
+                     const char *pub_date) {
     if (!app || !app->model) return;
     downloads_ensure_dir();
 
     /* Stable channel identity = collection_id (falls back to the transient cid). */
     /* The feed's itunes:duration can be wrong (mis-tagged episode). For a
-     * completed local download, trust the real M4A duration read from the moov
-     * box, so the player's progress bar doesn't end early while audio keeps
-     * playing past the displayed end. */
+     * completed local download, trust the real duration. The normal completion
+     * path already computed it during the remux (the worker persisted it into
+     * the task's duration_sec), so `dur` is authoritative there — re-probing the
+     * whole .aac here (aac_file_probe scans every frame) was a full-file read on
+     * the UI thread that doubled the post-download I/O and made the task appear
+     * stuck at 100%. Only fall back to a full probe when we don't already have a
+     * valid duration (recovery/backfill of a legacy record). */
     if (path && path[0]) {
-        int real_dur = cache_local_file_duration(path);
-        if (real_dur > 0) {
-            printf("[DBG] cache_local_add: ep='%s' feed_dur=%d real_dur=%d\n",
-                   ep_title ? ep_title : "", dur, real_dur);
+        struct stat st;
+        if (stat(path, &st) != 0 || st.st_size <= 0) {
+            printf("[DBG] cache_local_add: ep='%s' file missing/empty -> skip\n",
+                   ep_title ? ep_title : "");
             fflush(stdout);
-            dur = real_dur;
-        } else {
-            printf("[DBG] cache_local_add: ep='%s' probe fail (feed_dur=%d) -> skip\n",
-                   ep_title ? ep_title : "", dur);
-            fflush(stdout);
-            /* The recorded path has no complete, playable file behind it — a
-             * stale/truncated task record (or a failed remux). Adding it anyway
-             * forks a duplicate "identical" episode for the same real file (the
-             * 资讯早7点 bug). Recovery already indexes every real on-SD file, so
-             * skip instead of inserting a broken/duplicate row. */
+            /* The recorded path has no file behind it — a stale/truncated task
+             * record (or a failed remux). Adding it anyway forks a duplicate
+             * "identical" episode for the same real file (the 资讯早7点 bug).
+             * Recovery already indexes every real on-SD file, so skip instead of
+             * inserting a broken/duplicate row. */
             return;
+        }
+        if (dur <= 0) {
+            int real_dur = cache_local_file_duration(path);
+            if (real_dur > 0) {
+                printf("[DBG] cache_local_add: ep='%s' probed dur=%d\n",
+                       ep_title ? ep_title : "", real_dur);
+                fflush(stdout);
+                dur = real_dur;
+            } else {
+                printf("[DBG] cache_local_add: ep='%s' probe fail (dur=%d) -> skip\n",
+                       ep_title ? ep_title : "", dur);
+                fflush(stdout);
+                return;
+            }
         }
     }
 
     int canon = (collection_id > 0) ? collection_id : cid;
-    bool added = local_model_add(app, canon, collection_id, ch_title, eid, ep_title, url, dur);
+    bool added = local_model_add(app, canon, collection_id, ch_title, eid, ep_title,
+                                 url, dur, next_download_seq(app), pub_date);
 
     app->model->local_has_content = true;
     app->model->local_sd_mounted  = true;
@@ -826,6 +873,20 @@ void cache_local_update_duration(struct PodcastApp *app, int episode_id, int dur
         if (e->duration_sec == duration_sec) return;   /* already correct */
         e->duration_sec = duration_sec;
         local_write_channel(app, e->channel_id);       /* persist to the bucket JSON */
+        return;
+    }
+}
+
+void cache_local_update_pub_date(struct PodcastApp *app, int episode_id, const char *pub_date)
+{
+    if (!app || !app->model || episode_id <= 0 || !pub_date || !pub_date[0]) return;
+    PodcastModel *m = app->model;
+    for (int i = 0; i < m->local_episode_count; i++) {
+        Episode *e = &m->local_episodes[i];
+        if (e->id != episode_id) continue;
+        if (strcmp(e->pub_date, pub_date) == 0) return;   /* already correct */
+        snprintf(e->pub_date, sizeof(e->pub_date), "%s", pub_date);
+        local_write_channel(app, e->channel_id);          /* persist to the bucket JSON */
         return;
     }
 }

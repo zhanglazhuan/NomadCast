@@ -40,7 +40,8 @@ int  task_store_create(struct PodcastApp *app,
                        const char *ep_title, const char *ch_title,
                        int duration_sec, const char *path,
                        const char *audio_url,
-                       int episode_id, int channel_id, int collection_id);
+                       int episode_id, int channel_id, int collection_id,
+                       const char *pub_date);
 
 /** Overwrite a single task file with current model state.
  *  Called after status changes (pending→downloading, downloading→complete). */

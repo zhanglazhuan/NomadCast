@@ -75,8 +75,10 @@ static void task_to_json(FILE *f, const DownloadTask *t) {
     json_esc(f, t->file_path);
     fprintf(f, "\",\"url\":\"");
     json_esc(f, t->audio_url);
-    fprintf(f, "\",\"epid\":%d,\"chid\":%d,\"colid\":%d}\n",
+    fprintf(f, "\",\"epid\":%d,\"chid\":%d,\"colid\":%d,\"pub\":\"",
             t->episode_id, t->channel_id, t->collection_id);
+    json_esc(f, t->pub_date);
+    fprintf(f, "\"}\n");
 }
 
 static bool task_from_json(const char *line, DownloadTask *t) {
@@ -119,6 +121,7 @@ static bool task_from_json(const char *line, DownloadTask *t) {
     GET_INT("epid", t->episode_id);
     GET_INT("chid", t->channel_id);
     GET_INT("colid",t->collection_id);
+    GET_STR("pub",  t->pub_date, sizeof(t->pub_date));
     return t->id > 0;
     #undef GET_INT
     #undef GET_LL
@@ -213,7 +216,8 @@ int task_store_create(struct PodcastApp *app,
                       const char *ep_title, const char *ch_title,
                       int duration_sec, const char *path,
                       const char *audio_url,
-                      int episode_id, int channel_id, int collection_id)
+                      int episode_id, int channel_id, int collection_id,
+                      const char *pub_date)
 {
     if (!app || !app->model) return -1;
     PodcastModel *m = app->model;
@@ -242,6 +246,7 @@ int task_store_create(struct PodcastApp *app,
     t->collection_id  = collection_id;
     snprintf(t->episode_title, sizeof(t->episode_title), "%s", ep_title ? ep_title : "");
     snprintf(t->channel_title, sizeof(t->channel_title), "%s", ch_title ? ch_title : "");
+    snprintf(t->pub_date, sizeof(t->pub_date), "%s", pub_date ? pub_date : "");
     snprintf(t->file_path, sizeof(t->file_path), "%s", path ? path : "");
     snprintf(t->audio_url, sizeof(t->audio_url), "%s", audio_url ? audio_url : "");
 

@@ -15,7 +15,8 @@ void cache_local_add(struct PodcastApp *app,
                      int channel_id, const char *channel_title,
                      int episode_id, const char *episode_title,
                      const char *audio_url, int duration_sec,
-                     const char *file_path, int collection_id);
+                     const char *file_path, int collection_id,
+                     const char *pub_date);
 
 /** True if an episode with this id is already in the local library index.
  *  Used to dedup the boot-time backfill from completed download tasks. */
@@ -32,6 +33,13 @@ bool cache_local_has_path(struct PodcastApp *app, const char *path);
  *  rewrite the owning channel's metadata bucket.  No-op if the episode id is
  *  not in the local library (e.g. it was a network stream, not a download). */
 void cache_local_update_duration(struct PodcastApp *app, int episode_id, int duration_sec);
+
+/** Backfill an indexed local episode's published date (iTunes releaseDate) and
+ *  rewrite the owning channel's metadata bucket. Used to recover the network
+ *  episode order for episodes recovered as orphans or downloaded before the
+ *  pub_date field was persisted. No-op if the episode id is not in the local
+ *  library or the date is already set. */
+void cache_local_update_pub_date(struct PodcastApp *app, int episode_id, const char *pub_date);
 
 /** Remove one downloaded episode: delete its audio file on SD, drop it from the
  *  local library model, and rewrite (or delete) the owning channel's metadata

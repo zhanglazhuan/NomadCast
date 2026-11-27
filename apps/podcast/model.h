@@ -42,7 +42,12 @@ typedef struct {
     download_status_t status;
     int     progress;
     int     duration_sec;
+    bool    finalizing;          /* transient (never persisted): HTTP bytes are done,
+                                    the worker is now remuxing MP4→ADTS to disk */
     time_t  created_at;          /* epoch — for 3-day filtering */
+    char    pub_date[128];       /* network feed published date (iTunes releaseDate);
+                                    persisted so the local list can reproduce the
+                                    network episode order (see view_channel sort) */
     char    file_path[512];      /* SD-card path to saved audio */
     char    audio_url[1024];     /* original CDN URL (for retry) */
 } DownloadTask;
@@ -92,6 +97,7 @@ typedef struct {
     int     duration_sec;
     char    description[512];
     char    pub_date[128];
+    time_t  downloaded_at;   /* local downloads only: epoch when the file finished */
 } Episode;
 
 /* ── Search results ──────────────────────────────────────────────────────── */

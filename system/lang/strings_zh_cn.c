@@ -113,6 +113,13 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "频道不存在",
     "全部",
 
+    /* Podcast — channel sort */
+    "排序",
+    "默认正序",
+    "默认反序",
+    "最新下载",
+    "最早下载",
+
     /* Podcast — player */
     "标题",
     "时长",
@@ -161,6 +168,7 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "等待",
     "完成",
     "失败",
+    "处理中",
     "预计",
     "状态",
     "无下载任务",

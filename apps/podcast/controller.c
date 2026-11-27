@@ -777,6 +777,18 @@ static bool dl_set_status(PodcastApp *app, int task_id, download_status_t status
     return idx >= 0;
 }
 
+/* Transient "finalizing" flag (never persisted). The HTTP bytes are fully
+ * received, so the worker flips this on while it remuxes MP4→ADTS to disk — a
+ * full-file read+write that otherwise leaves the task frozen at "100%" with no
+ * indication. The download page renders it as 处理中 instead of a dead 100%. */
+static void dl_set_finalizing(PodcastApp *app, int task_id, bool on) {
+    if (!app || !app->model) return;
+    podcast_model_download_lock(app);
+    int idx = dl_find_index(app->model, task_id);
+    if (idx >= 0) app->model->download_tasks[idx].finalizing = on;
+    podcast_model_download_unlock(app);
+}
+
 /* Callback context — set by the worker before http_download_to_file.
  * Must be static: dl_progress_cb signature is fixed by hal.h. */
 static DownloadCtx *g_dl_cb_ctx = NULL;
@@ -999,16 +1011,30 @@ static void dl_worker_task(void *arg)
 
             /* Turn a complete scratch .m4a into the final seekable .aac: remux
              * MP4→ADTS, falling back to a raw copy when it isn't MP4 (e.g. an
-             * MP3, already seekable and sniffed by the decoder). */
+             * MP3, already seekable and sniffed by the decoder). Flip the task
+             * "finalizing" for the duration so the UI shows 处理中, not a dead
+             * 100%, while the full-file remux streams out. */
+            int remux_dur = 0;
             if (ok && finalize) {
-                int d = 0;
-                ok = mp4_remux_to_adts(s_scratch, s_path, &d) ||
+                dl_set_finalizing(app, task_id, true);
+                ok = mp4_remux_to_adts(s_scratch, s_path, &remux_dur) ||
                      mp4_copy_file(s_scratch, s_path);
+                dl_set_finalizing(app, task_id, false);
                 if (ok) remove(s_scratch);
                 else ESP_LOGE(TAG, "dl: task %d remux/copy failed", task_id);
             }
 
             if (ok) {
+                /* The remux computed the real duration from the sample table —
+                 * persist it so cache_local_add can skip its redundant full-file
+                 * probe (a whole .aac scan that ran on the UI thread and made the
+                 * download appear stuck at 100%). */
+                if (remux_dur > 0) {
+                    podcast_model_download_lock(app);
+                    int di = dl_find_index(app->model, task_id);
+                    if (di >= 0) app->model->download_tasks[di].duration_sec = remux_dur;
+                    podcast_model_download_unlock(app);
+                }
                 dl_set_status(app, task_id, DOWNLOAD_STATUS_COMPLETED, 100);
                 task_store_update(app, task_id);
                 dl_done_push(ctx, task_id);   /* hand off to CPU0 for event + cache */
@@ -1189,7 +1215,8 @@ void controller_process_download(void)
         DownloadTask *t = &m->download_tasks[idx];
         cache_local_add(app, t->channel_id, t->channel_title,
                         t->episode_id, t->episode_title, t->audio_url,
-                        t->duration_sec, t->file_path, t->collection_id);
+                        t->duration_sec, t->file_path, t->collection_id,
+                        t->pub_date);
         ESP_LOGI(TAG, "process_dl: firing DOWNLOAD_COMPLETED (task %d)", task_id);
         app_event_fire(APP_EVENT_DOWNLOAD_COMPLETED, NULL);
     }
@@ -1481,14 +1508,15 @@ void podcast_controller_play_channel(struct PodcastApp *app, int cid) {
 
 bool podcast_controller_download_episode(struct PodcastApp *app, const char *url,
     const char *title, const char *channel_title)
-{ return podcast_controller_download_episode_ex2(app, url, title, channel_title, 0, 0, 0, 0); }
+{ return podcast_controller_download_episode_ex2(app, url, title, channel_title, 0, 0, 0, 0, NULL); }
 
 bool podcast_controller_download_episode_ex(struct PodcastApp *app, const char *url,
     const char *title, const char *channel_title, int ch_id, int ep_id)
-{ return podcast_controller_download_episode_ex2(app, url, title, channel_title, ch_id, ep_id, 0, 0); }
+{ return podcast_controller_download_episode_ex2(app, url, title, channel_title, ch_id, ep_id, 0, 0, NULL); }
 
 bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char *url,
-    const char *title, const char *channel_title, int ch_id, int ep_id, int dur, int col_id)
+    const char *title, const char *channel_title, int ch_id, int ep_id, int dur, int col_id,
+    const char *pub_date)
 {
     if (s_storage_suspended) {
         lv_toast_show(tr(STR_USB_HINT), 3000);
@@ -1513,7 +1541,7 @@ bool podcast_controller_download_episode_ex2(struct PodcastApp *app, const char 
      * now a PENDING entry in download_tasks (the worker's source of truth). */
     int task_id = task_store_create(app, title, channel_title,
                                      dur, path, proxy_url,
-                                     ep_id, ch_id, col_id);
+                                     ep_id, ch_id, col_id, pub_date);
     if (task_id < 0) {
         ESP_LOGE(TAG, "dl: task_store_create failed");
         return false;

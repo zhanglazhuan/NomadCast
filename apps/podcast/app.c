@@ -51,7 +51,8 @@ static void podcast_app_start(lv_obj_t *root, lv_group_t *group)
                 !cache_local_has_path(&g_podcast_app, t->file_path)) {
                 cache_local_add(&g_podcast_app, t->channel_id, t->channel_title,
                                 t->episode_id, t->episode_title, t->audio_url,
-                                t->duration_sec, t->file_path, t->collection_id);
+                                t->duration_sec, t->file_path, t->collection_id,
+                                t->pub_date);
             }
         }
     }
