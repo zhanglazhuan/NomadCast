@@ -269,6 +269,10 @@ static void on_ota_checked(ota_check_result_t result,
     case OTA_CHECK_ERROR_PARSE:
         toast(tr(STR_INVALID_SERVER_RESPONSE));
         break;
+
+    case OTA_CHECK_ERROR_NO_FIRMWARE:
+        toast(tr(STR_NO_FIRMWARE_AVAILABLE));
+        break;
     }
 }
 

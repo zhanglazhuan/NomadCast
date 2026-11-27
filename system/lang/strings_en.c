@@ -57,6 +57,7 @@ const char *const strings_en[STR_COUNT] = {
     "Server unreachable",
     "Invalid server response",
     "No network connection",
+    "No firmware available",
 
     /* Settings — About */
     "Device Name",

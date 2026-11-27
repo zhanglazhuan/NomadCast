@@ -30,6 +30,7 @@ typedef enum {
     OTA_CHECK_ERROR_NETWORK,     /* HTTP / DNS / TLS failure */
     OTA_CHECK_ERROR_PARSE,       /* manifest.json parse error */
     OTA_CHECK_ERROR_NO_URL,      /* Manifest URL not configured */
+    OTA_CHECK_ERROR_NO_FIRMWARE, /* Server OK but no firmware uploaded (404) */
 } ota_check_result_t;
 
 typedef void (*ota_check_cb_t)(ota_check_result_t result,

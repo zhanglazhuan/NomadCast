@@ -142,6 +142,17 @@ static esp_err_t manifest_http_handler(esp_http_client_event_t *evt)
     case HTTP_EVENT_ON_FINISH: {
         ctx->buffer[ctx->len] = '\0';
 
+        /* The server returns 404 {"error":"No firmware available"} when no .bin
+         * has been uploaded yet. That is a valid server response (not a parse
+         * error), so surface it distinctly instead of "服务器响应无效". */
+        int status = esp_http_client_get_status_code(evt->client);
+        if (status == HttpStatus_NotFound) {
+            ESP_LOGW(TAG, "no firmware on server (404)");
+            ctx->cb(OTA_CHECK_ERROR_NO_FIRMWARE, NULL, NULL, NULL, NULL, ctx->user_data);
+            free(ctx);
+            return ESP_OK;
+        }
+
         /* Parse JSON */
         cJSON *root = cJSON_Parse(ctx->buffer);
         if (!root) {

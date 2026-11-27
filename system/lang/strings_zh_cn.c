@@ -57,6 +57,7 @@ const char *const strings_zh_cn[STR_COUNT] = {
     "服务器不可达",
     "服务器响应无效",
     "无网络连接",
+    "服务器暂无可用固件",
 
     /* Settings — About */
     "设备名称",
